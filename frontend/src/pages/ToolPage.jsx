@@ -444,8 +444,26 @@ const ToolPage = () => {
                           </div>
                         </div>
                       ))}
+                      {/* Add-more tile fits inline in the grid (next to the images) to save space */}
+                      <label
+                        data-testid="add-more-tile"
+                        onDragOver={(e) => e.preventDefault()}
+                        onDrop={(e) => { e.preventDefault(); const fl = Array.from(e.dataTransfer.files || []); if (fl.length) onFiles(fl); }}
+                        className="group rounded-xl border-2 border-dashed border-slate-300 dark:border-white/15 bg-slate-50 dark:bg-white/[0.02] flex flex-col items-center justify-center gap-2 cursor-pointer hover:border-rose-400 hover:bg-rose-50/50 dark:hover:bg-rose-500/5 text-slate-400 hover:text-rose-500 transition-colors p-2 min-h-full"
+                      >
+                        <span className="grid place-items-center w-11 h-11 rounded-full bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 group-hover:border-rose-300 transition-colors">
+                          <Icons.Plus className="w-5 h-5" />
+                        </span>
+                        <span className="text-xs font-semibold">Add more</span>
+                        <input
+                          type="file"
+                          accept={isImageInput ? 'image/*' : (slug === 'merge-pdf' ? '.pdf,image/*' : '.pdf')}
+                          multiple
+                          className="hidden"
+                          onChange={(e) => { const fl = Array.from(e.target.files || []); if (fl.length) onFiles(fl); e.target.value = ''; }}
+                        />
+                      </label>
                     </div>
-                    <FileDrop accept={isImageInput ? 'image/*' : (slug === 'merge-pdf' ? '.pdf,image/*' : '.pdf')} multiple onFiles={onFiles} label="Add more" hint="drop to append" />
                   </div>
                 )}
 

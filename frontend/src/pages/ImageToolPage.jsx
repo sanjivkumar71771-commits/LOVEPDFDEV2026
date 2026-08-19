@@ -54,11 +54,57 @@ const PrimaryBtn = ({ busy, busyText, text, icon: I, onClick, testId }) => (
 );
 
 /* ---------------- Compress ---------------- */
+// Client-side compression that binary-searches JPEG quality (and downscales if
+// needed) to bring an image at or below a chosen target file size.
+const compressImageToTarget = async (file, targetBytes, maxW) => {
+  const img = new Image();
+  const objUrl = URL.createObjectURL(file);
+  img.src = objUrl;
+  await new Promise((res, rej) => { img.onload = res; img.onerror = rej; });
+
+  const render = (scaleFactor, q) => new Promise((resolve) => {
+    const baseW = maxW > 0 ? Math.min(img.naturalWidth, maxW) : img.naturalWidth;
+    const w = Math.max(1, Math.round(baseW * scaleFactor));
+    const ratio = w / img.naturalWidth;
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = Math.max(1, Math.round(img.naturalHeight * ratio));
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    canvas.toBlob((b) => resolve(b), 'image/jpeg', q);
+  });
+
+  let best = null;
+  let scale = 1;
+  for (let attempt = 0; attempt < 6; attempt++) {
+    // binary-search quality for the current scale
+    let lo = 0.1, hi = 0.95, bestForScale = null;
+    for (let i = 0; i < 8; i++) {
+      const q = (lo + hi) / 2;
+      const blob = await render(scale, q);
+      if (blob.size <= targetBytes) { bestForScale = blob; lo = q; } else { hi = q; }
+    }
+    if (bestForScale) { best = bestForScale; break; }
+    // even lowest quality is too big at this scale -> keep smallest, downscale & retry
+    const lowest = await render(scale, 0.1);
+    best = lowest;
+    if (lowest.size <= targetBytes) break;
+    scale *= 0.8;
+  }
+  URL.revokeObjectURL(objUrl);
+  return best;
+};
+
 const CompressTool = () => {
   const [file, setFile] = useState(null);
   const [preview, setPreview] = useState(null);
+  const [mode, setMode] = useState('quality'); // 'quality' | 'target'
   const [quality, setQuality] = useState(75);
   const [maxWidth, setMaxWidth] = useState(0);
+  const [targetVal, setTargetVal] = useState(200);
+  const [targetUnit, setTargetUnit] = useState('KB');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [result, setResult] = useState(null);
@@ -72,24 +118,36 @@ const CompressTool = () => {
   const run = async () => {
     setBusy(true); setError(''); setResult(null);
     try {
-      const fd = new FormData();
-      fd.append('file', file);
-      fd.append('quality', quality);
-      fd.append('max_width', maxWidth);
-      const res = await fetch(`${API}/compress`, { method: 'POST', body: fd });
-      if (!res.ok) { const j = await res.json().catch(() => null); throw new Error(j?.detail || 'Compression failed.'); }
-      const blob = await res.blob();
-      const cd = res.headers.get('Content-Disposition') || '';
-      const m = cd.match(/filename="?([^";]+)"?/);
-      const r = { blob, name: m ? m[1] : 'compressed.jpg', url: URL.createObjectURL(blob) };
-      setResult(r);
-      downloadBlob(r.blob, r.name);
+      if (mode === 'target') {
+        const mult = targetUnit === 'MB' ? 1024 * 1024 : 1024;
+        const targetBytes = Math.max(1, Number(targetVal) || 0) * mult;
+        const blob = await compressImageToTarget(file, targetBytes, maxWidth);
+        if (!blob) throw new Error('Could not compress this image. Please try another file.');
+        const name = file.name.replace(/\.[^.]+$/, '') + '_compressed.jpg';
+        const r = { blob, name, url: URL.createObjectURL(blob), target: targetBytes };
+        setResult(r);
+        downloadBlob(r.blob, r.name);
+      } else {
+        const fd = new FormData();
+        fd.append('file', file);
+        fd.append('quality', quality);
+        fd.append('max_width', maxWidth);
+        const res = await fetch(`${API}/compress`, { method: 'POST', body: fd });
+        if (!res.ok) { const j = await res.json().catch(() => null); throw new Error(j?.detail || 'Compression failed.'); }
+        const blob = await res.blob();
+        const cd = res.headers.get('Content-Disposition') || '';
+        const m = cd.match(/filename="?([^";]+)"?/);
+        const r = { blob, name: m ? m[1] : 'compressed.jpg', url: URL.createObjectURL(blob) };
+        setResult(r);
+        downloadBlob(r.blob, r.name);
+      }
     } catch (e) { setError(e.message); }
     setBusy(false);
   };
 
   if (result) {
     const saved = Math.max(0, Math.round((1 - result.blob.size / file.size) * 100));
+    const hitTarget = result.target ? result.blob.size <= result.target : true;
     return (
       <Panel>
         <div className="text-center space-y-3" data-testid="compress-result">
@@ -97,8 +155,13 @@ const CompressTool = () => {
           <p className="text-sm text-slate-500 dark:text-slate-400">
             {fmtSize(file.size)} → <b className="text-emerald-500">{fmtSize(result.blob.size)}</b> · saved {saved}%
           </p>
+          {result.target && (
+            <p className={`text-xs font-semibold ${hitTarget ? 'text-emerald-500' : 'text-amber-500'}`}>
+              {hitTarget ? `Target ${fmtSize(result.target)} reached` : `Smallest possible: could not go below ${fmtSize(result.target)} while keeping the image usable`}
+            </p>
+          )}
           <button data-testid="download-compressed-btn" onClick={() => downloadBlob(result.blob, result.name)} className="btn-primary text-white font-semibold px-6 py-3 rounded-xl inline-flex items-center gap-2"><Download className="w-4 h-4" /> Download {result.name}</button>
-          <div><button onClick={() => { setFile(null); setResult(null); setPreview(null); }} className="text-sm text-rose-500 font-semibold inline-flex items-center gap-1"><RefreshCw className="w-3.5 h-3.5" /> Compress another image</button></div>
+          <div><button onClick={() => { setFile(null); setResult(null); setPreview(null); setMode('quality'); }} className="text-sm text-rose-500 font-semibold inline-flex items-center gap-1"><RefreshCw className="w-3.5 h-3.5" /> Compress another image</button></div>
         </div>
       </Panel>
     );
@@ -110,10 +173,40 @@ const CompressTool = () => {
     <Panel>
       {preview && <div data-testid="file-preview" className="flex justify-center rounded-xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/[0.02] p-3"><img src={preview} alt="Preview" className="max-h-72 rounded-lg object-contain" /></div>}
       <FileChip file={file} onRemove={() => { setFile(null); setPreview(null); }} />
-      <Field label={`Quality: ${quality}%`}>
-        <input data-testid="quality-slider" type="range" min="10" max="95" step="5" value={quality} onChange={(e) => setQuality(Number(e.target.value))} className="w-full accent-rose-500" />
-        <p className="hint">Lower quality = smaller file. 70–80% usually looks identical.</p>
+
+      <Field label="How would you like to compress?">
+        <div className="grid grid-cols-2 gap-2">
+          <button data-testid="mode-quality" onClick={() => setMode('quality')}
+            className={`px-4 py-2.5 rounded-xl text-sm font-semibold border transition-colors ${mode === 'quality' ? 'btn-primary text-white border-transparent' : 'border-slate-200 dark:border-white/10 hover:bg-slate-100 dark:hover:bg-white/5'}`}>By quality</button>
+          <button data-testid="mode-target" onClick={() => setMode('target')}
+            className={`px-4 py-2.5 rounded-xl text-sm font-semibold border transition-colors ${mode === 'target' ? 'btn-primary text-white border-transparent' : 'border-slate-200 dark:border-white/10 hover:bg-slate-100 dark:hover:bg-white/5'}`}>By target size</button>
+        </div>
       </Field>
+
+      {mode === 'target' ? (
+        <Field label="Compress this image to (choose your target size)">
+          <div className="flex items-stretch gap-2">
+            <input data-testid="target-size-input" type="number" min="1" value={targetVal} onChange={(e) => setTargetVal(e.target.value)} className="input flex-1" placeholder="e.g. 100" />
+            <select data-testid="target-unit-select" value={targetUnit} onChange={(e) => setTargetUnit(e.target.value)} className="input w-24">
+              <option value="KB">KB</option>
+              <option value="MB">MB</option>
+            </select>
+          </div>
+          <div className="flex flex-wrap gap-2 mt-3">
+            {[{ v: 20, u: 'KB' }, { v: 50, u: 'KB' }, { v: 100, u: 'KB' }, { v: 200, u: 'KB' }, { v: 500, u: 'KB' }, { v: 1, u: 'MB' }].map((p) => (
+              <button key={`${p.v}${p.u}`} data-testid={`target-preset-${p.v}${p.u}`} onClick={() => { setTargetVal(p.v); setTargetUnit(p.u); }}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${Number(targetVal) === p.v && targetUnit === p.u ? 'btn-primary text-white border-transparent' : 'border-slate-200 dark:border-white/10 hover:bg-slate-100 dark:hover:bg-white/5'}`}>{p.v} {p.u}</button>
+            ))}
+          </div>
+          <p className="hint">Enter the size you want (for example <b>100 KB</b>). We&apos;ll bring your image at or below it while keeping it as sharp as possible — perfect for uploads with strict size limits.</p>
+        </Field>
+      ) : (
+        <Field label={`Quality: ${quality}%`}>
+          <input data-testid="quality-slider" type="range" min="10" max="95" step="5" value={quality} onChange={(e) => setQuality(Number(e.target.value))} className="w-full accent-rose-500" />
+          <p className="hint">Lower quality = smaller file. 70–80% usually looks identical.</p>
+        </Field>
+      )}
+
       <Field label="Max width">
         <div className="flex gap-2 flex-wrap">
           {[{ v: 0, l: 'Original' }, { v: 1920, l: '1920px' }, { v: 1280, l: '1280px' }, { v: 800, l: '800px' }].map((o) => (

@@ -102,7 +102,7 @@
 # Testing Data - Main Agent and testing sub agent both should log testing data below this section
 #====================================================================================================
 
-user_problem_statement: "Test the LovePDF app (a client-side PDF tools web app built with React). Base URL is the app's frontend root. We recently changed the tool page (src/pages/ToolPage.jsx). Please verify THREE things: 1) NEW PREVIEW GRID UI for multi-file tools 'Merge PDF' and 'JPG to PDF', 2) DRAG-AND-DROP REORDER on /tool/jpg-to-pdf, 3) STATE-CLEAR-ON-TOOL-CHANGE BUG FIX"
+user_problem_statement: "Test the 'Compress Image' tool on the LovePDF app at route /tool/compress-image (React app). We just added a new 'target file size (KB/MB)' compression option."
 
 frontend:
   - task: "NEW PREVIEW GRID UI for multi-file tools (Merge PDF and JPG to PDF)"
@@ -141,10 +141,52 @@ frontend:
         agent: "testing"
         comment: "✅ PASSED - State properly clears when navigating between tools. Test 1: Uploaded file to Compress PDF, then navigated to JPG to PDF - confirmed empty state with no carried-over files. Test 2: Uploaded images to JPG to PDF, then navigated to Merge PDF - confirmed fresh empty state. The useEffect hook with [slug] dependency correctly resets all state variables when tool changes."
 
+  - task: "Compress Image - Target file size compression mode"
+    implemented: true
+    working: true
+    file: "src/pages/ImageToolPage.jsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "testing"
+        comment: "✅ PASSED - Target file size compression feature working perfectly. Test results: 1) Mode toggle buttons ('By quality' and 'By target size') are visible and functional. 'By quality' is selected by default with quality slider visible. 2) Clicking 'By target size' correctly shows target-size input (data-testid='target-size-input'), unit dropdown (data-testid='target-unit-select'), and preset buttons (20KB, 50KB, 100KB, 200KB, 500KB, 1MB). 3) Clicked '100 KB' preset button - correctly set target to 100 KB. 4) Compression produced result: 1.03 MB → 99 KB (saved 91%). Result is at/below target (99 KB vs 100 KB target). 5) 'Target 100 KB reached' message displayed correctly. 6) Download button (data-testid='download-compressed-btn') is present and visible. Client-side compression algorithm (compressImageToTarget) successfully binary-searches JPEG quality and downscales as needed to meet target size."
+
+  - task: "Compress Image - Quality mode regression test"
+    implemented: true
+    working: true
+    file: "src/pages/ImageToolPage.jsx"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: false
+    status_history:
+      - working: false
+        agent: "testing"
+        comment: "❌ FAILED - Quality mode compression calls backend API endpoint /api/image/compress but backend is not running. Backend error: 'KeyError: MONGO_URL' - backend server failed to start due to missing MONGO_URL environment variable. Connection refused on port 8001. This is a backend infrastructure issue, not a compress-image tool issue. The quality mode code is correct but cannot be tested without a running backend."
+      - working: true
+        agent: "testing"
+        comment: "✅ PASSED - Quality mode compression now working correctly with backend running. Test results: Uploaded 216 KB test image (2000x1500 JPG), adjusted quality slider to 50%, clicked Compress button. Backend endpoint /api/image/compress processed successfully. Result: 216 KB → 69 KB (68% saved). No errors displayed. Download button visible and functional. Backend is running properly and quality-based compression via backend API is fully operational."
+
+  - task: "Compress Image - State reset on 'Compress another image'"
+    implemented: true
+    working: true
+    file: "src/pages/ImageToolPage.jsx"
+    stuck_count: 0
+    priority: "low"
+    needs_retesting: false
+    status_history:
+      - working: false
+        agent: "testing"
+        comment: "⚠️ Minor Issue - After clicking 'Compress another image' and re-uploading, the mode does not reset to 'By quality' (default). Instead, it remains on 'By target size' mode. The CompressTool component should reset the mode state to 'quality' when the reset button is clicked. This is a minor UX issue - the tool still functions correctly, but the default mode is not restored after reset."
+      - working: true
+        agent: "testing"
+        comment: "✅ PASSED - Mode reset functionality now working correctly. Test flow: 1) Uploaded image and switched to 'By target size' mode. 2) Selected 100 KB preset and compressed (result: 216 KB → 99 KB, 'Target 100 KB reached' message displayed). 3) Clicked 'Compress another image' button. 4) Re-uploaded image. 5) Verified mode correctly reset to 'By quality' - quality slider is visible, target size input is hidden, 'By quality' button has btn-primary class. The fix in line 164 (setMode('quality')) is working as expected."
+
 metadata:
   created_by: "testing_agent"
-  version: "1.0"
-  test_sequence: 1
+  version: "1.2"
+  test_sequence: 3
   run_ui: true
   last_tested: "2025-08-19"
 
@@ -157,3 +199,7 @@ test_plan:
 agent_communication:
   - agent: "testing"
     message: "Completed comprehensive testing of all three requested features for LovePDF app ToolPage.jsx changes. All tests PASSED successfully. 1) Preview grid UI displays correctly with all required elements (thumbnails, badges, remove buttons, filenames, arrow buttons) for both Merge PDF and JPG to PDF tools. 2) Drag-and-drop reorder works perfectly - files can be reordered by dragging cards or using arrow buttons. 3) State-clear-on-tool-change bug fix verified - no files carry over when switching between tools. The useEffect with [slug] dependency properly resets all state. Screenshots captured for all test scenarios. No issues found."
+  - agent: "testing"
+    message: "Completed testing of NEW 'Compress Image' target file size feature at /tool/compress-image. MAIN FEATURE PASSED: Target size compression works perfectly - compressed 1.03 MB image to 99 KB (target was 100 KB). All UI elements present and functional: mode toggle buttons, target size input/dropdown, preset buttons, result view with size comparison, 'Target reached' message, and download button. ISSUES FOUND: 1) Quality mode regression test FAILED due to backend not running (missing MONGO_URL env var, connection refused on port 8001) - this is infrastructure issue, not tool code issue. 2) Minor UX issue: mode state does not reset to 'By quality' default after clicking 'Compress another image' - it stays on 'By target size'. Overall: NEW target compression feature is fully functional and meets all requirements."
+  - agent: "testing"
+    message: "RE-TESTED Compress Image tool after backend was started. BOTH PREVIOUSLY FAILING TESTS NOW PASS: 1) Quality mode (backend path) - Successfully compressed 216 KB image to 69 KB (68% saved) using backend endpoint /api/image/compress. No errors, download button functional. 2) Mode reset regression - After target-size compression and clicking 'Compress another image', mode correctly resets to 'By quality' with quality slider visible. All Compress Image features are now fully functional and working as expected."
