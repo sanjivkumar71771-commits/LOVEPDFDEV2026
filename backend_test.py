@@ -4,7 +4,7 @@ import requests
 import json
 import sys
 
-BASE_URL = "https://45ca9796-e5fd-4358-a4b3-f57a860064e7.preview.emergentagent.com/api"
+BASE_URL = "https://site-launch-376.preview.emergentagent.com/api"
 ADMIN_EMAIL = "admin@lovepdf.com"
 ADMIN_PASSWORD = "Admin@12345"
 
