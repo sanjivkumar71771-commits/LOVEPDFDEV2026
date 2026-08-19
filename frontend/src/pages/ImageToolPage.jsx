@@ -222,14 +222,33 @@ const CompressTool = () => {
 };
 
 /* ---------------- Remove background ---------------- */
+const BG_SWATCHES = ['#ffffff', '#000000', '#f43f5e', '#3b82f6', '#22c55e', '#facc15', '#a855f7', '#f97316'];
+
+// Composite a transparent cutout over a solid colour and return a PNG blob
+const compositeOnColor = (url, color) => new Promise((resolve, reject) => {
+  const img = new Image();
+  img.onload = () => {
+    const c = document.createElement('canvas');
+    c.width = img.naturalWidth; c.height = img.naturalHeight;
+    const ctx = c.getContext('2d');
+    ctx.fillStyle = color;
+    ctx.fillRect(0, 0, c.width, c.height);
+    ctx.drawImage(img, 0, 0);
+    c.toBlob((b) => (b ? resolve(b) : reject(new Error('Could not build image'))), 'image/png');
+  };
+  img.onerror = reject;
+  img.src = url;
+});
+
 const RemoveBgTool = () => {
   const [file, setFile] = useState(null);
   const [preview, setPreview] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [result, setResult] = useState(null);
+  const [bg, setBg] = useState('transparent'); // 'transparent' | hex color
 
-  const onFiles = (list) => { const f = list[0]; setFile(f); setResult(null); setError(''); setPreview(URL.createObjectURL(f)); };
+  const onFiles = (list) => { const f = list[0]; setFile(f); setResult(null); setError(''); setBg('transparent'); setPreview(URL.createObjectURL(f)); };
 
   const run = async () => {
     setBusy(true); setError('');
@@ -238,22 +257,60 @@ const RemoveBgTool = () => {
       const res = await fetch(`${API}/remove-bg`, { method: 'POST', body: fd });
       if (!res.ok) { const j = await res.json().catch(() => null); throw new Error(j?.detail || 'Background removal failed.'); }
       const blob = await res.blob();
-      const r = { blob, name: file.name.replace(/\.[^.]+$/, '') + '_no_bg.png', url: URL.createObjectURL(blob) };
+      const engine = res.headers.get('X-Bg-Engine') || '';
+      const r = { blob, name: file.name.replace(/\.[^.]+$/, '') + '_no_bg.png', url: URL.createObjectURL(blob), engine };
       setResult(r);
-      downloadBlob(r.blob, r.name);
     } catch (e) { setError(e.message); }
     setBusy(false);
+  };
+
+  const doDownload = async () => {
+    try {
+      if (bg === 'transparent') { downloadBlob(result.blob, result.name); return; }
+      const blob = await compositeOnColor(result.url, bg);
+      downloadBlob(blob, result.name.replace('_no_bg', '_bg'));
+    } catch (e) { setError('Could not prepare the download. Please try again.'); }
   };
 
   if (result) {
     return (
       <Panel>
-        <div className="text-center space-y-3" data-testid="removebg-result">
-          <div className="inline-block rounded-xl p-3 border border-slate-200 dark:border-white/10" style={CHECKER}>
-            <img src={result.url} alt="No background" className="max-h-72 object-contain" />
+        <div className="space-y-4" data-testid="removebg-result">
+          <div className="flex justify-center">
+            <div className="inline-block rounded-xl p-3 border border-slate-200 dark:border-white/10"
+              style={bg === 'transparent' ? CHECKER : { backgroundColor: bg }}>
+              <img src={result.url} alt="Background removed" className="max-h-72 object-contain" />
+            </div>
           </div>
-          <div><button data-testid="download-nobg-btn" onClick={() => downloadBlob(result.blob, result.name)} className="btn-primary text-white font-semibold px-6 py-3 rounded-xl inline-flex items-center gap-2"><Download className="w-4 h-4" /> Download transparent PNG</button></div>
-          <button onClick={() => { setFile(null); setResult(null); setPreview(null); }} className="text-sm text-rose-500 font-semibold inline-flex items-center gap-1"><RefreshCw className="w-3.5 h-3.5" /> Try another photo</button>
+
+          <div>
+            <p className="text-sm font-medium mb-2 text-center">Choose a background</p>
+            <div className="flex items-center justify-center gap-2 flex-wrap">
+              <button data-testid="bg-transparent" onClick={() => setBg('transparent')} title="Transparent"
+                className={`w-9 h-9 rounded-full border-2 overflow-hidden ${bg === 'transparent' ? 'border-rose-500 ring-2 ring-rose-500/30' : 'border-slate-200 dark:border-white/20'}`}
+                style={CHECKER} />
+              {BG_SWATCHES.map((c) => (
+                <button key={c} data-testid={`bg-${c}`} onClick={() => setBg(c)} title={c}
+                  className={`w-9 h-9 rounded-full border-2 ${bg === c ? 'border-rose-500 ring-2 ring-rose-500/30' : 'border-slate-200 dark:border-white/20'}`}
+                  style={{ backgroundColor: c }} />
+              ))}
+              <label title="Custom colour" className={`relative w-9 h-9 rounded-full border-2 grid place-items-center cursor-pointer overflow-hidden ${bg !== 'transparent' && !BG_SWATCHES.includes(bg) ? 'border-rose-500 ring-2 ring-rose-500/30' : 'border-slate-200 dark:border-white/20'}`}>
+                <Icons.Pipette className="w-4 h-4 text-slate-500 pointer-events-none" />
+                <input data-testid="bg-custom" type="color" onChange={(e) => setBg(e.target.value)} className="absolute inset-0 opacity-0 cursor-pointer" />
+              </label>
+            </div>
+          </div>
+
+          <div className="text-center space-y-3">
+            <button data-testid="download-nobg-btn" onClick={doDownload} className="btn-primary text-white font-semibold px-6 py-3 rounded-xl inline-flex items-center gap-2">
+              <Download className="w-4 h-4" /> Download {bg === 'transparent' ? 'transparent PNG' : 'image'}
+            </button>
+            {result.engine === 'offline' && (
+              <p className="text-xs text-slate-400">Processed with our free offline engine</p>
+            )}
+            {error && <p className="text-sm text-rose-500 font-medium">{error}</p>}
+            <div><button onClick={() => { setFile(null); setResult(null); setPreview(null); setBg('transparent'); }} className="text-sm text-rose-500 font-semibold inline-flex items-center gap-1"><RefreshCw className="w-3.5 h-3.5" /> Try another photo</button></div>
+          </div>
         </div>
       </Panel>
     );
@@ -267,7 +324,7 @@ const RemoveBgTool = () => {
       <FileChip file={file} onRemove={() => { setFile(null); setPreview(null); }} />
       {error && <p className="text-sm text-rose-500 font-medium" data-testid="tool-error">{error}</p>}
       <PrimaryBtn testId="removebg-btn" busy={busy} busyText="Removing background..." text="Remove background" icon={Icons.Eraser} onClick={run} />
-      <p className="hint text-center">Powered by AI · returns a transparent PNG</p>
+      <p className="hint text-center">Free &amp; automatic · you can pick a new background after removal</p>
     </Panel>
   );
 };

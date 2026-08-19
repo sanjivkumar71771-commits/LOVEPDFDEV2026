@@ -104,6 +104,23 @@
 
 user_problem_statement: "Test the 'Compress Image' tool on the LovePDF app at route /tool/compress-image (React app). We just added a new 'target file size (KB/MB)' compression option."
 
+backend:
+  - task: "Remove Background - multi-key rotation + free offline fallback"
+    implemented: true
+    working: true
+    file: "backend/image_tools.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "Added 3 remove.bg API keys in backend/.env as REMOVEBG_API_KEYS. /api/image/remove-bg now rotates through all configured keys (on 401/402/403/429/network error it moves to the next key). If every key fails, it falls back to a FREE offline engine (rembg u2net) via run_in_threadpool so the tool never stops working. Returns a transparent PNG plus an X-Bg-Engine response header ('remove.bg' or 'offline'). rembg installed and verified locally (model downloaded, removal succeeded)."
+      - working: true
+        agent: "testing"
+        comment: "✅ PASSED - All three tests passed successfully. TEST 1 (Remove BG with real image): HTTP 200, Content-Type: image/png, X-Bg-Engine: offline, valid PNG signature (89504e470d0a1a0a), 3819 bytes response. Backend logs show all 3 remove.bg API keys were tried (got 400 Bad Request - keys exhausted/invalid), then successfully fell back to offline rembg engine. TEST 2 (Invalid file rejection): HTTP 415 with correct error message 'Upload a JPEG, PNG or WebP image.' when posting text file. TEST 3 (Compress regression): HTTP 200, Content-Type: image/jpeg, Content-Disposition with filename present, 6698 bytes response. Multi-key rotation and free offline fallback working exactly as designed."
+
+
 frontend:
   - task: "NEW PREVIEW GRID UI for multi-file tools (Merge PDF and JPG to PDF)"
     implemented: true
@@ -184,8 +201,8 @@ frontend:
         comment: "✅ PASSED - Mode reset functionality now working correctly. Test flow: 1) Uploaded image and switched to 'By target size' mode. 2) Selected 100 KB preset and compressed (result: 216 KB → 99 KB, 'Target 100 KB reached' message displayed). 3) Clicked 'Compress another image' button. 4) Re-uploaded image. 5) Verified mode correctly reset to 'By quality' - quality slider is visible, target size input is hidden, 'By quality' button has btn-primary class. The fix in line 164 (setMode('quality')) is working as expected."
 
 metadata:
-  created_by: "testing_agent"
-  version: "1.2"
+  created_by: "main_agent"
+  version: "1.3"
   test_sequence: 3
   run_ui: true
   last_tested: "2025-08-19"
@@ -197,9 +214,15 @@ test_plan:
   test_priority: "high_first"
 
 agent_communication:
+  - agent: "main"
+    message: "Please test the /api/image/remove-bg endpoint. It should: (1) accept a JPEG/PNG/WebP upload and return a PNG (transparent cutout) with HTTP 200; (2) rotate through 3 remove.bg keys configured in backend/.env (REMOVEBG_API_KEYS) — these free keys may be exhausted/invalid, in which case the endpoint must AUTOMATICALLY fall back to the free offline rembg engine and STILL return a valid transparent PNG (do NOT return 5xx just because remove.bg keys fail). (3) Verify the response Content-Type is image/png and the X-Bg-Engine header is present ('remove.bg' or 'offline'). (4) Verify a non-image upload (e.g. a .txt) is rejected with 415. NOTE: rembg first run may download a ~176MB model (already pre-downloaded here), so the first request may take longer. Also confirm /api/image/compress still works (regression)."
+
+agent_communication:
   - agent: "testing"
     message: "Completed comprehensive testing of all three requested features for LovePDF app ToolPage.jsx changes. All tests PASSED successfully. 1) Preview grid UI displays correctly with all required elements (thumbnails, badges, remove buttons, filenames, arrow buttons) for both Merge PDF and JPG to PDF tools. 2) Drag-and-drop reorder works perfectly - files can be reordered by dragging cards or using arrow buttons. 3) State-clear-on-tool-change bug fix verified - no files carry over when switching between tools. The useEffect with [slug] dependency properly resets all state. Screenshots captured for all test scenarios. No issues found."
   - agent: "testing"
     message: "Completed testing of NEW 'Compress Image' target file size feature at /tool/compress-image. MAIN FEATURE PASSED: Target size compression works perfectly - compressed 1.03 MB image to 99 KB (target was 100 KB). All UI elements present and functional: mode toggle buttons, target size input/dropdown, preset buttons, result view with size comparison, 'Target reached' message, and download button. ISSUES FOUND: 1) Quality mode regression test FAILED due to backend not running (missing MONGO_URL env var, connection refused on port 8001) - this is infrastructure issue, not tool code issue. 2) Minor UX issue: mode state does not reset to 'By quality' default after clicking 'Compress another image' - it stays on 'By target size'. Overall: NEW target compression feature is fully functional and meets all requirements."
   - agent: "testing"
+  - agent: "testing"
+    message: "Completed backend testing for 'Remove Background - multi-key rotation + free offline fallback' feature. All 3 tests PASSED: (1) /api/image/remove-bg with real image returns HTTP 200, valid PNG with X-Bg-Engine: offline header (remove.bg keys exhausted, successfully fell back to rembg). (2) Invalid file (text) correctly rejected with HTTP 415. (3) /api/image/compress regression test passed - HTTP 200 with image response and Content-Disposition filename. Backend logs confirm multi-key rotation attempted all 3 keys before fallback. Feature is fully functional and ready for production."
     message: "RE-TESTED Compress Image tool after backend was started. BOTH PREVIOUSLY FAILING TESTS NOW PASS: 1) Quality mode (backend path) - Successfully compressed 216 KB image to 69 KB (68% saved) using backend endpoint /api/image/compress. No errors, download button functional. 2) Mode reset regression - After target-size compression and clicking 'Compress another image', mode correctly resets to 'By quality' with quality slider visible. All Compress Image features are now fully functional and working as expected."
