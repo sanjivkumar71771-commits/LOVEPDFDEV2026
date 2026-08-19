@@ -5,6 +5,7 @@ import * as Icons from 'lucide-react';
 import { ChevronRight, X, Download, Loader2, RefreshCw } from 'lucide-react';
 import Header from '../components/Header';
 import Footer from '../components/Footer';
+import Seo from '../components/Seo';
 import FileDrop from '../components/FileDrop';
 import { TOOLS, ICON_TILE } from '../mock';
 
@@ -690,6 +691,13 @@ export default function ImageToolPage() {
 
   return (
     <div className="min-h-screen bg-white dark:bg-[#0a0d16] text-slate-900 dark:text-slate-100 transition-colors">
+      <Seo
+        path={`/tool/${slug}`}
+        title={`${tool ? tool.name : 'Image Tool'} — Free Online Tool | LovePDF`}
+        description={tool ? tool.desc : 'Free online image tools.'}
+        keywords={`${slug.replace(/-/g, ' ')}, free ${slug.replace(/-/g, ' ')} online`}
+        jsonLd={{ '@context': 'https://schema.org', '@type': 'WebApplication', name: `${tool ? tool.name : 'Image Tool'} - LovePDF`, applicationCategory: 'Utility', operatingSystem: 'Any', offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' } }}
+      />
       <Header />
       <section className="relative overflow-hidden grid-hero border-b border-slate-200 dark:border-white/10">
         <div className="absolute -top-24 right-0 w-96 h-96 rounded-full bg-rose-500/15 blur-[110px]" />

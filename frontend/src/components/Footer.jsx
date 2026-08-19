@@ -45,7 +45,10 @@ const Footer = () => {
         </div>
         <div className="mt-12 pt-6 border-t border-slate-200 dark:border-white/10 flex flex-col sm:flex-row items-center justify-between gap-3">
           <p className="text-sm text-slate-500 dark:text-slate-400">© {new Date().getFullYear()} LovePDF. All rights reserved.</p>
-          <p className="text-sm text-slate-500 dark:text-slate-400 flex items-center gap-1.5">Made with <Heart className="w-3.5 h-3.5 text-rose-500 fill-rose-500" /> for people who love clean PDFs</p>
+          <div className="flex items-center gap-5">
+            <Link to="/blog" className="text-sm text-slate-500 dark:text-slate-400 hover:text-rose-500 dark:hover:text-rose-400 transition-colors">Blog</Link>
+            <p className="text-sm text-slate-500 dark:text-slate-400 flex items-center gap-1.5">Made with <Heart className="w-3.5 h-3.5 text-rose-500 fill-rose-500" /> for people who love clean PDFs</p>
+          </div>
         </div>
       </div>
     </footer>

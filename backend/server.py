@@ -76,6 +76,18 @@ app.include_router(pdf_router)
 from image_tools import router as image_router
 app.include_router(image_router)
 
+# Admin panel + SEO management router
+from seo_admin import router as seo_router, ensure_default_admin
+app.include_router(seo_router)
+
+
+@app.on_event("startup")
+async def _seed_admin():
+    try:
+        await ensure_default_admin()
+    except Exception as e:
+        logging.getLogger(__name__).warning("admin seed skipped: %s", e)
+
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,

@@ -5,6 +5,7 @@ import * as Icons from 'lucide-react';
 import { ChevronRight, X, RotateCw, Trash2, Download, Loader2, CheckCircle2, ArrowLeft, Sparkles } from 'lucide-react';
 import Header from '../components/Header';
 import Footer from '../components/Footer';
+import Seo from '../components/Seo';
 import FileDrop from '../components/FileDrop';
 import { TOOLS, ICON_TILE, SERVER_TOOLS, OCR_LANGS } from '../mock';
 import * as pdf from '../lib/pdfUtils';
@@ -324,6 +325,13 @@ const ToolPage = () => {
 
   return (
     <div className="min-h-screen bg-white dark:bg-[#0a0d16] text-slate-900 dark:text-slate-100 transition-colors">
+      <Seo
+        path={`/tool/${slug}`}
+        title={`${tool.name} — Free Online Tool | LovePDF`}
+        description={tool.desc}
+        keywords={`${tool.name.toLowerCase()}, ${slug.replace(/-/g, ' ')}, free ${tool.name.toLowerCase()} online`}
+        jsonLd={{ '@context': 'https://schema.org', '@type': 'WebApplication', name: `${tool.name} - LovePDF`, applicationCategory: 'Utility', operatingSystem: 'Any', description: tool.desc, offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' } }}
+      />
       <Header />
 
       <section className="relative overflow-hidden grid-hero border-b border-slate-200 dark:border-white/10">

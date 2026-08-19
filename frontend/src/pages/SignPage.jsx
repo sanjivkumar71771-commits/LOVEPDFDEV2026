@@ -4,6 +4,7 @@ import * as Icons from 'lucide-react';
 import { ChevronRight, ChevronLeft, ChevronRight as ChevRight, PenTool, Type, Eraser, Download, Loader2, CheckCircle2, X, Trash2, Move } from 'lucide-react';
 import Header from '../components/Header';
 import Footer from '../components/Footer';
+import Seo from '../components/Seo';
 import FileDrop from '../components/FileDrop';
 import * as pdf from '../lib/pdfUtils';
 
@@ -188,6 +189,13 @@ const SignPage = () => {
 
   return (
     <div className="min-h-screen bg-white dark:bg-[#0a0d16] text-slate-900 dark:text-slate-100 transition-colors">
+      <Seo
+        path="/tool/sign-pdf"
+        title="Sign PDF — Free Online PDF Signature Tool | LovePDF"
+        description="Sign your PDF documents online for free. Draw or type your signature and place it anywhere on the page — secure and easy."
+        keywords="sign pdf, pdf signature, esign pdf, electronic signature, sign pdf online free"
+        jsonLd={{ '@context': 'https://schema.org', '@type': 'WebApplication', name: 'Sign PDF - LovePDF', applicationCategory: 'Utility', operatingSystem: 'Any', offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' } }}
+      />
       <Header />
       <section className="relative overflow-hidden grid-hero border-b border-slate-200 dark:border-white/10">
         <div className="absolute -top-24 right-0 w-96 h-96 rounded-full bg-violet-500/15 blur-[110px]" />

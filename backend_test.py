@@ -1,224 +1,508 @@
 #!/usr/bin/env python3
-"""
-Backend API tests for LovePDF app - Remove Background and Compress Image endpoints
-"""
+"""Comprehensive backend test for Admin/SEO management endpoints"""
 import requests
-import io
-from PIL import Image
+import json
 import sys
 
-# Backend base URL from frontend/.env
-BASE_URL = "https://45ca9796-e5fd-4358-a4b3-f57a860064e7.preview.emergentagent.com"
+BASE_URL = "https://45ca9796-e5fd-4358-a4b3-f57a860064e7.preview.emergentagent.com/api"
+ADMIN_EMAIL = "admin@lovepdf.com"
+ADMIN_PASSWORD = "Admin@12345"
 
-def create_test_image(width=800, height=600, color=(255, 0, 0), format='JPEG'):
-    """Create a test image in memory"""
-    img = Image.new('RGB', (width, height), color=color)
-    buf = io.BytesIO()
-    img.save(buf, format=format)
-    buf.seek(0)
-    return buf
+# Test results tracking
+results = []
 
-def create_test_text_file():
-    """Create a test text file"""
-    return io.BytesIO(b"This is a test text file, not an image.")
+def test(name, passed, status_code=None, details=""):
+    """Record test result"""
+    status = "✅ PASS" if passed else "❌ FAIL"
+    result = f"{status} | {name}"
+    if status_code:
+        result += f" | HTTP {status_code}"
+    if details:
+        result += f" | {details}"
+    results.append((passed, result))
+    print(result)
+    return passed
 
-def test_remove_bg_with_image():
-    """Test 1: POST /api/image/remove-bg with a real photo"""
-    print("\n" + "="*80)
-    print("TEST 1: Remove Background with Real Image")
-    print("="*80)
-    
-    # Create a test JPEG image
-    test_image = create_test_image(800, 600, (100, 150, 200), 'JPEG')
-    
-    url = f"{BASE_URL}/api/image/remove-bg"
-    files = {'file': ('test_photo.jpg', test_image, 'image/jpeg')}
-    
-    print(f"Sending POST request to: {url}")
-    print("File: test_photo.jpg (800x600 JPEG)")
-    
-    try:
-        response = requests.post(url, files=files, timeout=120)
-        
-        print(f"\nStatus Code: {response.status_code}")
-        print(f"Content-Type: {response.headers.get('Content-Type', 'N/A')}")
-        print(f"X-Bg-Engine: {response.headers.get('X-Bg-Engine', 'N/A')}")
-        print(f"Content-Disposition: {response.headers.get('Content-Disposition', 'N/A')}")
-        print(f"Response Size: {len(response.content)} bytes")
-        
-        # Check if response is a valid PNG
-        if response.status_code == 200:
-            png_signature = response.content[:8]
-            expected_png_sig = b'\x89PNG\r\n\x1a\n'
-            is_valid_png = png_signature == expected_png_sig
-            print(f"Valid PNG signature: {is_valid_png}")
-            print(f"PNG signature bytes: {png_signature.hex()}")
-            
-            # Verify required conditions
-            checks = {
-                "HTTP 200": response.status_code == 200,
-                "Content-Type is image/png": response.headers.get('Content-Type') == 'image/png',
-                "X-Bg-Engine header present": 'X-Bg-Engine' in response.headers,
-                "X-Bg-Engine value valid": response.headers.get('X-Bg-Engine') in ['remove.bg', 'offline'],
-                "Valid PNG bytes": is_valid_png
-            }
-            
-            print("\n✓ Verification Checks:")
-            all_passed = True
-            for check, passed in checks.items():
-                status = "✅ PASS" if passed else "❌ FAIL"
-                print(f"  {status}: {check}")
-                if not passed:
-                    all_passed = False
-            
-            if all_passed:
-                print("\n🎉 TEST 1: PASSED")
-                engine = response.headers.get('X-Bg-Engine', 'unknown')
-                print(f"   Engine used: {engine}")
-                if engine == 'offline':
-                    print("   ℹ️  Note: Fell back to offline rembg engine (remove.bg keys likely exhausted)")
-                return True
-            else:
-                print("\n❌ TEST 1: FAILED - Some checks did not pass")
-                return False
-        else:
-            print(f"\n❌ TEST 1: FAILED - Expected HTTP 200, got {response.status_code}")
-            print(f"Response body: {response.text[:500]}")
-            return False
-            
-    except requests.exceptions.Timeout:
-        print("\n⚠️  TEST 1: TIMEOUT - Request took longer than 120 seconds")
-        print("   Note: First offline rembg run can take 10-40s to download model")
-        return False
-    except Exception as e:
-        print(f"\n❌ TEST 1: ERROR - {type(e).__name__}: {e}")
-        return False
-
-def test_remove_bg_with_invalid_file():
-    """Test 2: POST /api/image/remove-bg with invalid upload (text file)"""
-    print("\n" + "="*80)
-    print("TEST 2: Remove Background with Invalid File (Text)")
-    print("="*80)
-    
-    test_text = create_test_text_file()
-    
-    url = f"{BASE_URL}/api/image/remove-bg"
-    files = {'file': ('test.txt', test_text, 'text/plain')}
-    
-    print(f"Sending POST request to: {url}")
-    print("File: test.txt (text/plain)")
-    
-    try:
-        response = requests.post(url, files=files, timeout=30)
-        
-        print(f"\nStatus Code: {response.status_code}")
-        print(f"Content-Type: {response.headers.get('Content-Type', 'N/A')}")
-        
-        if response.status_code == 415:
-            print("\n✅ TEST 2: PASSED - Correctly rejected with HTTP 415")
-            print(f"   Response: {response.text[:200]}")
-            return True
-        else:
-            print(f"\n❌ TEST 2: FAILED - Expected HTTP 415, got {response.status_code}")
-            print(f"   Response: {response.text[:500]}")
-            return False
-            
-    except Exception as e:
-        print(f"\n❌ TEST 2: ERROR - {type(e).__name__}: {e}")
-        return False
-
-def test_compress_regression():
-    """Test 3: Regression test for /api/image/compress"""
-    print("\n" + "="*80)
-    print("TEST 3: Compress Image Regression (quality=60, max_width=0)")
-    print("="*80)
-    
-    # Create a test JPEG image
-    test_image = create_test_image(1200, 900, (200, 100, 50), 'JPEG')
-    
-    url = f"{BASE_URL}/api/image/compress"
-    files = {'file': ('test_image.jpg', test_image, 'image/jpeg')}
-    data = {'quality': 60, 'max_width': 0}
-    
-    print(f"Sending POST request to: {url}")
-    print("File: test_image.jpg (1200x900 JPEG)")
-    print(f"Parameters: quality=60, max_width=0")
-    
-    try:
-        response = requests.post(url, files=files, data=data, timeout=30)
-        
-        print(f"\nStatus Code: {response.status_code}")
-        print(f"Content-Type: {response.headers.get('Content-Type', 'N/A')}")
-        print(f"Content-Disposition: {response.headers.get('Content-Disposition', 'N/A')}")
-        print(f"Response Size: {len(response.content)} bytes")
-        
-        if response.status_code == 200:
-            content_type = response.headers.get('Content-Type', '')
-            content_disposition = response.headers.get('Content-Disposition', '')
-            
-            checks = {
-                "HTTP 200": response.status_code == 200,
-                "Content-Type is image": content_type.startswith('image/'),
-                "Content-Disposition has filename": 'filename=' in content_disposition,
-                "Response has content": len(response.content) > 0
-            }
-            
-            print("\n✓ Verification Checks:")
-            all_passed = True
-            for check, passed in checks.items():
-                status = "✅ PASS" if passed else "❌ FAIL"
-                print(f"  {status}: {check}")
-                if not passed:
-                    all_passed = False
-            
-            if all_passed:
-                print("\n🎉 TEST 3: PASSED")
-                return True
-            else:
-                print("\n❌ TEST 3: FAILED - Some checks did not pass")
-                return False
-        else:
-            print(f"\n❌ TEST 3: FAILED - Expected HTTP 200, got {response.status_code}")
-            print(f"Response body: {response.text[:500]}")
-            return False
-            
-    except Exception as e:
-        print(f"\n❌ TEST 3: ERROR - {type(e).__name__}: {e}")
-        return False
-
-def main():
-    print("="*80)
-    print("LovePDF Backend API Tests")
-    print("Testing Remove Background and Compress Image endpoints")
-    print("="*80)
-    print(f"Backend URL: {BASE_URL}")
-    
-    results = {}
-    
-    # Run all tests
-    results['test1_remove_bg_image'] = test_remove_bg_with_image()
-    results['test2_remove_bg_invalid'] = test_remove_bg_with_invalid_file()
-    results['test3_compress_regression'] = test_compress_regression()
-    
-    # Summary
+def print_summary():
+    """Print test summary table"""
     print("\n" + "="*80)
     print("TEST SUMMARY")
     print("="*80)
-    
-    for test_name, passed in results.items():
-        status = "✅ PASSED" if passed else "❌ FAILED"
-        print(f"{status}: {test_name}")
-    
+    passed = sum(1 for p, _ in results if p)
     total = len(results)
-    passed = sum(results.values())
-    print(f"\nTotal: {passed}/{total} tests passed")
-    
-    if passed == total:
-        print("\n🎉 All tests passed!")
-        sys.exit(0)
-    else:
-        print(f"\n⚠️  {total - passed} test(s) failed")
-        sys.exit(1)
+    print(f"Total: {passed}/{total} passed")
+    print("="*80)
+    for _, result in results:
+        print(result)
+    print("="*80)
 
-if __name__ == "__main__":
-    main()
+# ============================================================================
+# TEST 1: Authentication
+# ============================================================================
+print("\n### TEST 1: Authentication ###")
+
+# 1a. Login with correct credentials
+try:
+    resp = requests.post(f"{BASE_URL}/admin/login", json={
+        "email": ADMIN_EMAIL,
+        "password": ADMIN_PASSWORD
+    }, timeout=10)
+    
+    if resp.status_code == 200 and "access_token" in resp.json():
+        ACCESS_TOKEN = resp.json()["access_token"]
+        test("1a. Login with correct credentials", True, resp.status_code, f"Got access_token")
+    else:
+        test("1a. Login with correct credentials", False, resp.status_code, f"Response: {resp.text[:200]}")
+        sys.exit(1)
+except Exception as e:
+    test("1a. Login with correct credentials", False, details=f"Exception: {e}")
+    sys.exit(1)
+
+# 1b. Login with wrong password
+try:
+    resp = requests.post(f"{BASE_URL}/admin/login", json={
+        "email": ADMIN_EMAIL,
+        "password": "WrongPassword123"
+    }, timeout=10)
+    test("1b. Login with wrong password -> 401", resp.status_code == 401, resp.status_code, f"Response: {resp.text[:100]}")
+except Exception as e:
+    test("1b. Login with wrong password -> 401", False, details=f"Exception: {e}")
+
+# ============================================================================
+# TEST 2: GET /api/admin/me
+# ============================================================================
+print("\n### TEST 2: GET /api/admin/me ###")
+
+# 2a. With valid token
+try:
+    resp = requests.get(f"{BASE_URL}/admin/me", headers={
+        "Authorization": f"Bearer {ACCESS_TOKEN}"
+    }, timeout=10)
+    
+    if resp.status_code == 200 and resp.json().get("email") == ADMIN_EMAIL:
+        test("2a. GET /admin/me with valid token -> 200", True, resp.status_code, f"Email: {resp.json().get('email')}")
+    else:
+        test("2a. GET /admin/me with valid token -> 200", False, resp.status_code, f"Response: {resp.text[:200]}")
+except Exception as e:
+    test("2a. GET /admin/me with valid token -> 200", False, details=f"Exception: {e}")
+
+# 2b. Without Authorization header
+try:
+    resp = requests.get(f"{BASE_URL}/admin/me", timeout=10)
+    test("2b. GET /admin/me without token -> 401", resp.status_code == 401, resp.status_code)
+except Exception as e:
+    test("2b. GET /admin/me without token -> 401", False, details=f"Exception: {e}")
+
+# 2c. With garbage token
+try:
+    resp = requests.get(f"{BASE_URL}/admin/me", headers={
+        "Authorization": "Bearer garbage_token_12345"
+    }, timeout=10)
+    test("2c. GET /admin/me with garbage token -> 401", resp.status_code == 401, resp.status_code)
+except Exception as e:
+    test("2c. GET /admin/me with garbage token -> 401", False, details=f"Exception: {e}")
+
+# ============================================================================
+# TEST 3: SEO Pages
+# ============================================================================
+print("\n### TEST 3: SEO Pages ###")
+
+# 3a. PUT /api/admin/seo/pages with auth
+try:
+    resp = requests.put(f"{BASE_URL}/admin/seo/pages", 
+        headers={"Authorization": f"Bearer {ACCESS_TOKEN}"},
+        json={
+            "path": "/tool/merge-pdf",
+            "title": "Merge PDF Free",
+            "description": "Combine PDFs online",
+            "keywords": "merge pdf"
+        }, timeout=10)
+    test("3a. PUT /admin/seo/pages with auth -> 200", resp.status_code == 200, resp.status_code, f"Response: {resp.text[:100]}")
+except Exception as e:
+    test("3a. PUT /admin/seo/pages with auth -> 200", False, details=f"Exception: {e}")
+
+# 3b. GET /api/seo/page?path=/tool/merge-pdf (public, no auth)
+try:
+    resp = requests.get(f"{BASE_URL}/seo/page?path=/tool/merge-pdf", timeout=10)
+    
+    if resp.status_code == 200:
+        seo_data = resp.json().get("seo", {})
+        if seo_data and seo_data.get("title") == "Merge PDF Free":
+            test("3b. GET /seo/page (public) returns stored SEO", True, resp.status_code, f"Title: {seo_data.get('title')}")
+        else:
+            test("3b. GET /seo/page (public) returns stored SEO", False, resp.status_code, f"SEO data: {seo_data}")
+    else:
+        test("3b. GET /seo/page (public) returns stored SEO", False, resp.status_code, f"Response: {resp.text[:200]}")
+except Exception as e:
+    test("3b. GET /seo/page (public) returns stored SEO", False, details=f"Exception: {e}")
+
+# 3c. GET /api/admin/seo/pages (auth) lists it
+try:
+    resp = requests.get(f"{BASE_URL}/admin/seo/pages", 
+        headers={"Authorization": f"Bearer {ACCESS_TOKEN}"}, timeout=10)
+    
+    if resp.status_code == 200:
+        pages = resp.json().get("pages", [])
+        merge_pdf_page = next((p for p in pages if p.get("path") == "/tool/merge-pdf"), None)
+        if merge_pdf_page:
+            test("3c. GET /admin/seo/pages lists the page", True, resp.status_code, f"Found {len(pages)} pages")
+        else:
+            test("3c. GET /admin/seo/pages lists the page", False, resp.status_code, f"merge-pdf page not found in {len(pages)} pages")
+    else:
+        test("3c. GET /admin/seo/pages lists the page", False, resp.status_code, f"Response: {resp.text[:200]}")
+except Exception as e:
+    test("3c. GET /admin/seo/pages lists the page", False, details=f"Exception: {e}")
+
+# 3d. PUT without token -> 401
+try:
+    resp = requests.put(f"{BASE_URL}/admin/seo/pages", json={
+        "path": "/tool/test",
+        "title": "Test"
+    }, timeout=10)
+    test("3d. PUT /admin/seo/pages without token -> 401", resp.status_code == 401, resp.status_code)
+except Exception as e:
+    test("3d. PUT /admin/seo/pages without token -> 401", False, details=f"Exception: {e}")
+
+# ============================================================================
+# TEST 4: Site Settings
+# ============================================================================
+print("\n### TEST 4: Site Settings ###")
+
+# 4a. PUT /api/admin/site with auth
+try:
+    resp = requests.put(f"{BASE_URL}/admin/site",
+        headers={"Authorization": f"Bearer {ACCESS_TOKEN}"},
+        json={
+            "site_name": "LovePDF",
+            "site_url": "https://example.com",
+            "ga_measurement_id": "G-TEST123",
+            "gsc_verification": "verifycode",
+            "organization_name": "LovePDF"
+        }, timeout=10)
+    test("4a. PUT /admin/site with auth -> 200", resp.status_code == 200, resp.status_code, f"Response: {resp.text[:100]}")
+except Exception as e:
+    test("4a. PUT /admin/site with auth -> 200", False, details=f"Exception: {e}")
+
+# 4b. GET /api/seo/site (public) reflects ga_measurement_id
+try:
+    resp = requests.get(f"{BASE_URL}/seo/site", timeout=10)
+    
+    if resp.status_code == 200:
+        site_data = resp.json().get("site", {})
+        if site_data.get("ga_measurement_id") == "G-TEST123":
+            test("4b. GET /seo/site (public) reflects ga_measurement_id", True, resp.status_code, f"GA ID: {site_data.get('ga_measurement_id')}")
+        else:
+            test("4b. GET /seo/site (public) reflects ga_measurement_id", False, resp.status_code, f"GA ID: {site_data.get('ga_measurement_id')}")
+    else:
+        test("4b. GET /seo/site (public) reflects ga_measurement_id", False, resp.status_code, f"Response: {resp.text[:200]}")
+except Exception as e:
+    test("4b. GET /seo/site (public) reflects ga_measurement_id", False, details=f"Exception: {e}")
+
+# ============================================================================
+# TEST 5: Blog CRUD
+# ============================================================================
+print("\n### TEST 5: Blog CRUD ###")
+
+# 5a. POST /api/admin/blog (published post)
+try:
+    resp = requests.post(f"{BASE_URL}/admin/blog",
+        headers={"Authorization": f"Bearer {ACCESS_TOKEN}"},
+        json={
+            "slug": "how-to-merge-pdf",
+            "title": "How to merge PDF",
+            "excerpt": "Learn how to merge PDFs easily",
+            "content": "<p>hi</p>",
+            "published": True
+        }, timeout=10)
+    
+    if resp.status_code == 200 and "id" in resp.json():
+        BLOG_POST_ID = resp.json()["id"]
+        test("5a. POST /admin/blog (published) -> 200 with id", True, resp.status_code, f"ID: {BLOG_POST_ID}")
+    else:
+        test("5a. POST /admin/blog (published) -> 200 with id", False, resp.status_code, f"Response: {resp.text[:200]}")
+        BLOG_POST_ID = None
+except Exception as e:
+    test("5a. POST /admin/blog (published) -> 200 with id", False, details=f"Exception: {e}")
+    BLOG_POST_ID = None
+
+# 5b. GET /api/blog (public) lists the post
+try:
+    resp = requests.get(f"{BASE_URL}/blog", timeout=10)
+    
+    if resp.status_code == 200:
+        posts = resp.json().get("posts", [])
+        merge_post = next((p for p in posts if p.get("slug") == "how-to-merge-pdf"), None)
+        if merge_post:
+            test("5b. GET /blog (public) lists the post", True, resp.status_code, f"Found post with slug 'how-to-merge-pdf'")
+        else:
+            test("5b. GET /blog (public) lists the post", False, resp.status_code, f"Post not found in {len(posts)} posts")
+    else:
+        test("5b. GET /blog (public) lists the post", False, resp.status_code, f"Response: {resp.text[:200]}")
+except Exception as e:
+    test("5b. GET /blog (public) lists the post", False, details=f"Exception: {e}")
+
+# 5c. GET /api/blog/how-to-merge-pdf (public) returns full post
+try:
+    resp = requests.get(f"{BASE_URL}/blog/how-to-merge-pdf", timeout=10)
+    
+    if resp.status_code == 200:
+        post = resp.json().get("post", {})
+        if post.get("content") == "<p>hi</p>":
+            test("5c. GET /blog/{slug} (public) returns full post", True, resp.status_code, f"Content: {post.get('content')}")
+        else:
+            test("5c. GET /blog/{slug} (public) returns full post", False, resp.status_code, f"Content: {post.get('content')}")
+    else:
+        test("5c. GET /blog/{slug} (public) returns full post", False, resp.status_code, f"Response: {resp.text[:200]}")
+except Exception as e:
+    test("5c. GET /blog/{slug} (public) returns full post", False, details=f"Exception: {e}")
+
+# 5d. POST same slug again -> 400
+try:
+    resp = requests.post(f"{BASE_URL}/admin/blog",
+        headers={"Authorization": f"Bearer {ACCESS_TOKEN}"},
+        json={
+            "slug": "how-to-merge-pdf",
+            "title": "Duplicate",
+            "published": True
+        }, timeout=10)
+    test("5d. POST duplicate slug -> 400", resp.status_code == 400, resp.status_code, f"Response: {resp.text[:100]}")
+except Exception as e:
+    test("5d. POST duplicate slug -> 400", False, details=f"Exception: {e}")
+
+# 5e. PUT /api/admin/blog/{id} change title
+if BLOG_POST_ID:
+    try:
+        resp = requests.put(f"{BASE_URL}/admin/blog/{BLOG_POST_ID}",
+            headers={"Authorization": f"Bearer {ACCESS_TOKEN}"},
+            json={
+                "slug": "how-to-merge-pdf",
+                "title": "How to merge PDF - Updated",
+                "excerpt": "Learn how to merge PDFs easily",
+                "content": "<p>hi</p>",
+                "published": True
+            }, timeout=10)
+        test("5e. PUT /admin/blog/{id} change title -> 200", resp.status_code == 200, resp.status_code, f"Response: {resp.text[:100]}")
+    except Exception as e:
+        test("5e. PUT /admin/blog/{id} change title -> 200", False, details=f"Exception: {e}")
+else:
+    test("5e. PUT /admin/blog/{id} change title -> 200", False, details="Skipped - no blog post ID")
+
+# 5f. GET /api/blog/how-to-merge-pdf reflects new title
+try:
+    resp = requests.get(f"{BASE_URL}/blog/how-to-merge-pdf", timeout=10)
+    
+    if resp.status_code == 200:
+        post = resp.json().get("post", {})
+        if post.get("title") == "How to merge PDF - Updated":
+            test("5f. GET /blog/{slug} reflects new title", True, resp.status_code, f"Title: {post.get('title')}")
+        else:
+            test("5f. GET /blog/{slug} reflects new title", False, resp.status_code, f"Title: {post.get('title')}")
+    else:
+        test("5f. GET /blog/{slug} reflects new title", False, resp.status_code, f"Response: {resp.text[:200]}")
+except Exception as e:
+    test("5f. GET /blog/{slug} reflects new title", False, details=f"Exception: {e}")
+
+# 5g. Create unpublished post
+try:
+    resp = requests.post(f"{BASE_URL}/admin/blog",
+        headers={"Authorization": f"Bearer {ACCESS_TOKEN}"},
+        json={
+            "slug": "unpublished-draft",
+            "title": "Draft Post",
+            "published": False
+        }, timeout=10)
+    
+    if resp.status_code == 200:
+        UNPUBLISHED_ID = resp.json().get("id")
+        test("5g. POST unpublished post -> 200", True, resp.status_code, f"ID: {UNPUBLISHED_ID}")
+    else:
+        test("5g. POST unpublished post -> 200", False, resp.status_code, f"Response: {resp.text[:200]}")
+        UNPUBLISHED_ID = None
+except Exception as e:
+    test("5g. POST unpublished post -> 200", False, details=f"Exception: {e}")
+    UNPUBLISHED_ID = None
+
+# 5h. Unpublished post does NOT appear in GET /api/blog
+try:
+    resp = requests.get(f"{BASE_URL}/blog", timeout=10)
+    
+    if resp.status_code == 200:
+        posts = resp.json().get("posts", [])
+        draft_post = next((p for p in posts if p.get("slug") == "unpublished-draft"), None)
+        if not draft_post:
+            test("5h. Unpublished post NOT in GET /blog", True, resp.status_code, "Draft correctly hidden")
+        else:
+            test("5h. Unpublished post NOT in GET /blog", False, resp.status_code, "Draft post visible in public list")
+    else:
+        test("5h. Unpublished post NOT in GET /blog", False, resp.status_code, f"Response: {resp.text[:200]}")
+except Exception as e:
+    test("5h. Unpublished post NOT in GET /blog", False, details=f"Exception: {e}")
+
+# 5i. GET /api/blog/unpublished-draft -> 404
+try:
+    resp = requests.get(f"{BASE_URL}/blog/unpublished-draft", timeout=10)
+    test("5i. GET /blog/{unpublished-slug} -> 404", resp.status_code == 404, resp.status_code)
+except Exception as e:
+    test("5i. GET /blog/{unpublished-slug} -> 404", False, details=f"Exception: {e}")
+
+# 5j. DELETE /api/admin/blog/{id} -> 200
+if BLOG_POST_ID:
+    try:
+        resp = requests.delete(f"{BASE_URL}/admin/blog/{BLOG_POST_ID}",
+            headers={"Authorization": f"Bearer {ACCESS_TOKEN}"}, timeout=10)
+        test("5j. DELETE /admin/blog/{id} -> 200", resp.status_code == 200, resp.status_code, f"Response: {resp.text[:100]}")
+    except Exception as e:
+        test("5j. DELETE /admin/blog/{id} -> 200", False, details=f"Exception: {e}")
+else:
+    test("5j. DELETE /admin/blog/{id} -> 200", False, details="Skipped - no blog post ID")
+
+# 5k. DELETE non-existent id -> 404
+try:
+    resp = requests.delete(f"{BASE_URL}/admin/blog/non-existent-id-12345",
+        headers={"Authorization": f"Bearer {ACCESS_TOKEN}"}, timeout=10)
+    test("5k. DELETE non-existent blog id -> 404", resp.status_code == 404, resp.status_code)
+except Exception as e:
+    test("5k. DELETE non-existent blog id -> 404", False, details=f"Exception: {e}")
+
+# ============================================================================
+# TEST 6: Sitemap & Robots
+# ============================================================================
+print("\n### TEST 6: Sitemap & Robots ###")
+
+# 6a. GET /api/sitemap.xml
+try:
+    resp = requests.get(f"{BASE_URL}/sitemap.xml", timeout=10)
+    
+    if resp.status_code == 200:
+        content_type = resp.headers.get("content-type", "")
+        body = resp.text
+        
+        # Check content type
+        is_xml = "xml" in content_type.lower()
+        
+        # Check for valid XML structure
+        has_xml_declaration = '<?xml' in body
+        has_urlset = '<urlset' in body
+        
+        # Check for specific URLs
+        has_merge_pdf = '<loc>https://example.com/tool/merge-pdf</loc>' in body
+        
+        # Check for blog post (we deleted the published one, but check structure)
+        has_blog_section = '/blog/' in body or '<loc>https://example.com/blog</loc>' in body
+        
+        # Check that site_url is used (https://example.com from step 4)
+        uses_site_url = 'https://example.com' in body
+        
+        all_checks = is_xml and has_xml_declaration and has_urlset and has_merge_pdf and uses_site_url
+        
+        details = f"Content-Type: {content_type}, XML: {has_xml_declaration}, URLset: {has_urlset}, merge-pdf: {has_merge_pdf}, site_url: {uses_site_url}"
+        test("6a. GET /sitemap.xml -> 200, valid XML with tool URLs", all_checks, resp.status_code, details)
+        
+        if not all_checks:
+            print(f"   Sitemap body preview: {body[:500]}")
+    else:
+        test("6a. GET /sitemap.xml -> 200, valid XML with tool URLs", False, resp.status_code, f"Response: {resp.text[:200]}")
+except Exception as e:
+    test("6a. GET /sitemap.xml -> 200, valid XML with tool URLs", False, details=f"Exception: {e}")
+
+# 6b. GET /api/robots.txt
+try:
+    resp = requests.get(f"{BASE_URL}/robots.txt", timeout=10)
+    
+    if resp.status_code == 200:
+        content_type = resp.headers.get("content-type", "")
+        body = resp.text
+        
+        is_text = "text" in content_type.lower()
+        has_disallow_admin = "Disallow: /admin" in body
+        has_sitemap = "Sitemap:" in body
+        
+        all_checks = is_text and has_disallow_admin and has_sitemap
+        
+        details = f"Content-Type: {content_type}, Disallow /admin: {has_disallow_admin}, Sitemap line: {has_sitemap}"
+        test("6b. GET /robots.txt -> 200, contains Disallow /admin and Sitemap", all_checks, resp.status_code, details)
+        
+        if not all_checks:
+            print(f"   Robots.txt body: {body}")
+    else:
+        test("6b. GET /robots.txt -> 200, contains Disallow /admin and Sitemap", False, resp.status_code, f"Response: {resp.text[:200]}")
+except Exception as e:
+    test("6b. GET /robots.txt -> 200, contains Disallow /admin and Sitemap", False, details=f"Exception: {e}")
+
+# ============================================================================
+# TEST 7: Change Password
+# ============================================================================
+print("\n### TEST 7: Change Password ###")
+
+# 7a. POST /api/admin/change-password with correct current password
+try:
+    resp = requests.post(f"{BASE_URL}/admin/change-password",
+        headers={"Authorization": f"Bearer {ACCESS_TOKEN}"},
+        json={
+            "current_password": ADMIN_PASSWORD,
+            "new_password": "NewPass@999"
+        }, timeout=10)
+    test("7a. POST /admin/change-password -> 200", resp.status_code == 200, resp.status_code, f"Response: {resp.text[:100]}")
+except Exception as e:
+    test("7a. POST /admin/change-password -> 200", False, details=f"Exception: {e}")
+
+# 7b. Login with new password -> 200
+try:
+    resp = requests.post(f"{BASE_URL}/admin/login", json={
+        "email": ADMIN_EMAIL,
+        "password": "NewPass@999"
+    }, timeout=10)
+    
+    if resp.status_code == 200 and "access_token" in resp.json():
+        NEW_ACCESS_TOKEN = resp.json()["access_token"]
+        test("7b. Login with new password -> 200", True, resp.status_code, "Got new access_token")
+    else:
+        test("7b. Login with new password -> 200", False, resp.status_code, f"Response: {resp.text[:200]}")
+        NEW_ACCESS_TOKEN = None
+except Exception as e:
+    test("7b. Login with new password -> 200", False, details=f"Exception: {e}")
+    NEW_ACCESS_TOKEN = None
+
+# 7c. Login with old password -> 401
+try:
+    resp = requests.post(f"{BASE_URL}/admin/login", json={
+        "email": ADMIN_EMAIL,
+        "password": ADMIN_PASSWORD
+    }, timeout=10)
+    test("7c. Login with old password -> 401", resp.status_code == 401, resp.status_code)
+except Exception as e:
+    test("7c. Login with old password -> 401", False, details=f"Exception: {e}")
+
+# 7d. Change password back to original
+if NEW_ACCESS_TOKEN:
+    try:
+        resp = requests.post(f"{BASE_URL}/admin/change-password",
+            headers={"Authorization": f"Bearer {NEW_ACCESS_TOKEN}"},
+            json={
+                "current_password": "NewPass@999",
+                "new_password": ADMIN_PASSWORD
+            }, timeout=10)
+        test("7d. Change password back to original -> 200", resp.status_code == 200, resp.status_code, f"Response: {resp.text[:100]}")
+    except Exception as e:
+        test("7d. Change password back to original -> 200", False, details=f"Exception: {e}")
+else:
+    test("7d. Change password back to original -> 200", False, details="Skipped - no new access token")
+
+# 7e. Verify original password works again
+try:
+    resp = requests.post(f"{BASE_URL}/admin/login", json={
+        "email": ADMIN_EMAIL,
+        "password": ADMIN_PASSWORD
+    }, timeout=10)
+    test("7e. Login with restored password -> 200", resp.status_code == 200, resp.status_code)
+except Exception as e:
+    test("7e. Login with restored password -> 200", False, details=f"Exception: {e}")
+
+# ============================================================================
+# Print Summary
+# ============================================================================
+print_summary()
+
+# Exit with appropriate code
+failed = sum(1 for p, _ in results if not p)
+sys.exit(0 if failed == 0 else 1)

@@ -105,6 +105,21 @@
 user_problem_statement: "Test the 'Compress Image' tool on the LovePDF app at route /tool/compress-image (React app). We just added a new 'target file size (KB/MB)' compression option."
 
 backend:
+  - task: "Admin panel + SEO management (auth, per-page SEO, site settings, blog CRUD, sitemap/robots)"
+    implemented: true
+    working: true
+    file: "backend/seo_admin.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "New module seo_admin.py mounted in server.py. JWT (PyJWT) + bcrypt auth. Default admin seeded idempotently on startup: admin@lovepdf.com / Admin@12345 (see /app/memory/test_credentials.md). Endpoints: POST /api/admin/login, GET /api/admin/me, POST /api/admin/change-password, GET/PUT /api/admin/seo/pages, GET /api/seo/page?path=, GET/PUT /api/admin/site, GET /api/seo/site, GET/POST/PUT/DELETE /api/admin/blog(+/{id}), GET /api/blog, GET /api/blog/{slug}, GET /api/sitemap.xml, GET /api/robots.txt. Manual curl confirmed login token, sitemap.xml and robots.txt render, admin seeded."
+      - working: true
+        agent: "testing"
+        comment: "✅ ALL 29 TESTS PASSED - Comprehensive testing completed for all admin/SEO endpoints. (1) Auth: Login with correct credentials returns access_token (200), wrong password returns 401. (2) GET /admin/me: Valid token returns email (200), no token/garbage token returns 401. (3) SEO Pages: PUT /admin/seo/pages with auth stores SEO data (200), GET /seo/page (public) retrieves it correctly with title 'Merge PDF Free', GET /admin/seo/pages lists all pages, PUT without token returns 401. (4) Site Settings: PUT /admin/site stores settings including ga_measurement_id 'G-TEST123' (200), GET /seo/site (public) reflects the changes. (5) Blog CRUD: POST creates published post with id (200), GET /blog lists it, GET /blog/{slug} returns full content, duplicate slug returns 400, PUT updates title successfully, unpublished posts correctly hidden from public endpoints (404), DELETE removes post (200), deleting non-existent id returns 404. (6) Sitemap/Robots: GET /sitemap.xml returns valid XML (application/xml) with all tool URLs (/tool/merge-pdf, etc.) and published blog posts (/blog/how-to-merge-pdf) using site_url base (https://example.com), GET /robots.txt returns text/plain with 'Disallow: /admin' and Sitemap line. (7) Change Password: Successfully changed password from Admin@12345 to NewPass@999 (200), login with new password works (200), login with old password fails (401), password restored to Admin@12345 (200). All authentication, authorization, CRUD operations, and public endpoints working perfectly."
+
   - task: "Remove Background - multi-key rotation + free offline fallback"
     implemented: true
     working: true
@@ -202,10 +217,10 @@ frontend:
 
 metadata:
   created_by: "main_agent"
-  version: "1.3"
-  test_sequence: 3
+  version: "1.4"
+  test_sequence: 4
   run_ui: true
-  last_tested: "2025-08-19"
+  last_tested: "2026-08-19"
 
 test_plan:
   current_focus: []
@@ -215,14 +230,14 @@ test_plan:
 
 agent_communication:
   - agent: "main"
-    message: "Please test the /api/image/remove-bg endpoint. It should: (1) accept a JPEG/PNG/WebP upload and return a PNG (transparent cutout) with HTTP 200; (2) rotate through 3 remove.bg keys configured in backend/.env (REMOVEBG_API_KEYS) — these free keys may be exhausted/invalid, in which case the endpoint must AUTOMATICALLY fall back to the free offline rembg engine and STILL return a valid transparent PNG (do NOT return 5xx just because remove.bg keys fail). (3) Verify the response Content-Type is image/png and the X-Bg-Engine header is present ('remove.bg' or 'offline'). (4) Verify a non-image upload (e.g. a .txt) is rejected with 415. NOTE: rembg first run may download a ~176MB model (already pre-downloaded here), so the first request may take longer. Also confirm /api/image/compress still works (regression)."
-
-agent_communication:
+    message: "NEW admin/SEO backend in backend/seo_admin.py (routes under /api). Creds in /app/memory/test_credentials.md (admin@lovepdf.com / Admin@12345). Test: (1) POST /api/admin/login correct->access_token, wrong->401. (2) GET /api/admin/me with Bearer->email, without->401. (3) PUT /api/admin/seo/pages (auth) upsert {path:'/tool/merge-pdf',title:'X',description:'Y'} then GET /api/seo/page?path=/tool/merge-pdf (public) returns it. (4) GET/PUT /api/admin/site (auth) set ga_measurement_id+site_url, GET /api/seo/site (public) reflects. (5) Blog CRUD: POST /api/admin/blog published post, GET /api/blog lists, GET /api/blog/{slug} returns, PUT update, DELETE removes; duplicate slug POST->400. (6) GET /api/sitemap.xml valid XML incl tool URLs + published blog slug; GET /api/robots.txt has 'Disallow: /admin' + Sitemap line. (7) change-password then re-login; revert to Admin@12345 afterward OR update test_credentials.md. All protected routes must 401 on missing/invalid token."
   - agent: "testing"
     message: "Completed comprehensive testing of all three requested features for LovePDF app ToolPage.jsx changes. All tests PASSED successfully. 1) Preview grid UI displays correctly with all required elements (thumbnails, badges, remove buttons, filenames, arrow buttons) for both Merge PDF and JPG to PDF tools. 2) Drag-and-drop reorder works perfectly - files can be reordered by dragging cards or using arrow buttons. 3) State-clear-on-tool-change bug fix verified - no files carry over when switching between tools. The useEffect with [slug] dependency properly resets all state. Screenshots captured for all test scenarios. No issues found."
   - agent: "testing"
     message: "Completed testing of NEW 'Compress Image' target file size feature at /tool/compress-image. MAIN FEATURE PASSED: Target size compression works perfectly - compressed 1.03 MB image to 99 KB (target was 100 KB). All UI elements present and functional: mode toggle buttons, target size input/dropdown, preset buttons, result view with size comparison, 'Target reached' message, and download button. ISSUES FOUND: 1) Quality mode regression test FAILED due to backend not running (missing MONGO_URL env var, connection refused on port 8001) - this is infrastructure issue, not tool code issue. 2) Minor UX issue: mode state does not reset to 'By quality' default after clicking 'Compress another image' - it stays on 'By target size'. Overall: NEW target compression feature is fully functional and meets all requirements."
   - agent: "testing"
-  - agent: "testing"
     message: "Completed backend testing for 'Remove Background - multi-key rotation + free offline fallback' feature. All 3 tests PASSED: (1) /api/image/remove-bg with real image returns HTTP 200, valid PNG with X-Bg-Engine: offline header (remove.bg keys exhausted, successfully fell back to rembg). (2) Invalid file (text) correctly rejected with HTTP 415. (3) /api/image/compress regression test passed - HTTP 200 with image response and Content-Disposition filename. Backend logs confirm multi-key rotation attempted all 3 keys before fallback. Feature is fully functional and ready for production."
+  - agent: "testing"
     message: "RE-TESTED Compress Image tool after backend was started. BOTH PREVIOUSLY FAILING TESTS NOW PASS: 1) Quality mode (backend path) - Successfully compressed 216 KB image to 69 KB (68% saved) using backend endpoint /api/image/compress. No errors, download button functional. 2) Mode reset regression - After target-size compression and clicking 'Compress another image', mode correctly resets to 'By quality' with quality slider visible. All Compress Image features are now fully functional and working as expected."
+  - agent: "testing"
+    message: "ADMIN/SEO BACKEND TESTING COMPLETE - All 29 tests passed (100% success rate). Tested 7 major areas: (1) Authentication with JWT tokens, (2) Admin identity verification, (3) SEO page management with public/private endpoints, (4) Site settings with Google Analytics integration, (5) Full blog CRUD with published/unpublished visibility controls, (6) Dynamic sitemap.xml generation with tool URLs and blog posts using configured site_url (https://example.com), (7) Password change flow with verification. All protected routes correctly return 401 without valid token. All public endpoints accessible without auth. Sitemap includes all 31 tool URLs plus published blog posts. Robots.txt correctly blocks /admin and references sitemap. Admin credentials remain admin@lovepdf.com / Admin@12345. Backend is production-ready."

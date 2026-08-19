@@ -5,6 +5,7 @@ import { Star, Search, ArrowRight, Check } from 'lucide-react';
 import Header from '../components/Header';
 import Footer from '../components/Footer';
 import ToolCard from '../components/ToolCard';
+import Seo from '../components/Seo';
 import { TOOLS, CATEGORIES, STATS, STEPS, FEATURES, TESTIMONIALS, FAQS, ICON_TILE } from '../mock';
 
 const Home = () => {
@@ -30,6 +31,13 @@ const Home = () => {
 
   return (
     <div className="min-h-screen bg-white dark:bg-[#0a0d16] text-slate-900 dark:text-slate-100 transition-colors">
+      <Seo
+        path="/"
+        title="LovePDF — Free Online PDF & Image Tools"
+        description="Merge, split, compress, convert and edit PDFs and images online for free. Fast, secure and easy to use — no installation required."
+        keywords="pdf tools, merge pdf, split pdf, compress pdf, jpg to pdf, pdf to word, remove background, free online pdf"
+        jsonLd={{ '@context': 'https://schema.org', '@type': 'WebSite', name: 'LovePDF', description: 'Free online PDF and image tools.' }}
+      />
       <Header />
 
       {/* HERO */}

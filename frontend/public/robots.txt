@@ -1,0 +1,7 @@
+User-agent: *
+Allow: /
+Disallow: /admin
+
+# Dynamic robots & sitemap are served by the backend and reflect your latest
+# content. Submit the sitemap URL below in Google Search Console:
+Sitemap: /api/sitemap.xml
