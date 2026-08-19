@@ -224,21 +224,41 @@ const CompressTool = () => {
 /* ---------------- Remove background ---------------- */
 const BG_SWATCHES = ['#ffffff', '#000000', '#f43f5e', '#3b82f6', '#22c55e', '#facc15', '#a855f7', '#f97316'];
 
-// Composite a transparent cutout over a solid colour and return a PNG blob
-const compositeOnColor = (url, color) => new Promise((resolve, reject) => {
+// Composite the transparent cutout onto a chosen background (colour or image)
+// at a chosen output size. Returns a PNG blob.
+const loadImage = (src) => new Promise((resolve, reject) => {
   const img = new Image();
-  img.onload = () => {
-    const c = document.createElement('canvas');
-    c.width = img.naturalWidth; c.height = img.naturalHeight;
-    const ctx = c.getContext('2d');
-    ctx.fillStyle = color;
-    ctx.fillRect(0, 0, c.width, c.height);
-    ctx.drawImage(img, 0, 0);
-    c.toBlob((b) => (b ? resolve(b) : reject(new Error('Could not build image'))), 'image/png');
-  };
+  img.onload = () => resolve(img);
   img.onerror = reject;
-  img.src = url;
+  img.src = src;
 });
+
+const drawComposite = (ctx, w, h, opts) => {
+  const { bgType, color, bgImg, cutout } = opts;
+  ctx.clearRect(0, 0, w, h);
+  if (bgType === 'color') {
+    ctx.fillStyle = color;
+    ctx.fillRect(0, 0, w, h);
+  } else if (bgType === 'image' && bgImg) {
+    // cover
+    const s = Math.max(w / bgImg.naturalWidth, h / bgImg.naturalHeight);
+    const bw = bgImg.naturalWidth * s, bh = bgImg.naturalHeight * s;
+    ctx.drawImage(bgImg, (w - bw) / 2, (h - bh) / 2, bw, bh);
+  }
+  if (cutout) {
+    // contain
+    const s = Math.min(w / cutout.naturalWidth, h / cutout.naturalHeight);
+    const cw = cutout.naturalWidth * s, ch = cutout.naturalHeight * s;
+    ctx.drawImage(cutout, (w - cw) / 2, (h - ch) / 2, cw, ch);
+  }
+};
+
+const SIZE_PRESETS = [
+  { id: '1080', label: '1080 × 1080', w: 1080, h: 1080 },
+  { id: 'passport', label: '600 × 600', w: 600, h: 600 },
+  { id: 'portrait', label: '1200 × 1500', w: 1200, h: 1500 },
+  { id: 'wide', label: '1920 × 1080', w: 1920, h: 1080 },
+];
 
 const RemoveBgTool = () => {
   const [file, setFile] = useState(null);
@@ -246,9 +266,27 @@ const RemoveBgTool = () => {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [result, setResult] = useState(null);
-  const [bg, setBg] = useState('transparent'); // 'transparent' | hex color
 
-  const onFiles = (list) => { const f = list[0]; setFile(f); setResult(null); setError(''); setBg('transparent'); setPreview(URL.createObjectURL(f)); };
+  // Background: type + colour + uploaded image
+  const [bgType, setBgType] = useState('transparent'); // 'transparent' | 'color' | 'image'
+  const [color, setColor] = useState('#ffffff');
+  const [bgImgUrl, setBgImgUrl] = useState(null);
+  const [cutoutImg, setCutoutImg] = useState(null);
+  const [bgImg, setBgImg] = useState(null);
+
+  // Output size
+  const [sizeMode, setSizeMode] = useState('original'); // 'original' | 'custom'
+  const [customW, setCustomW] = useState('');
+  const [customH, setCustomH] = useState('');
+
+  const previewCanvas = useRef(null);
+
+  const resetBgState = () => {
+    setBgType('transparent'); setColor('#ffffff'); setBgImgUrl(null); setBgImg(null);
+    setCutoutImg(null); setSizeMode('original'); setCustomW(''); setCustomH('');
+  };
+
+  const onFiles = (list) => { const f = list[0]; setFile(f); setResult(null); setError(''); resetBgState(); setPreview(URL.createObjectURL(f)); };
 
   const run = async () => {
     setBusy(true); setError('');
@@ -258,58 +296,131 @@ const RemoveBgTool = () => {
       if (!res.ok) { const j = await res.json().catch(() => null); throw new Error(j?.detail || 'Background removal failed.'); }
       const blob = await res.blob();
       const engine = res.headers.get('X-Bg-Engine') || '';
-      const r = { blob, name: file.name.replace(/\.[^.]+$/, '') + '_no_bg.png', url: URL.createObjectURL(blob), engine };
+      const url = URL.createObjectURL(blob);
+      const r = { blob, name: file.name.replace(/\.[^.]+$/, '') + '_no_bg.png', url, engine };
       setResult(r);
+      const cut = await loadImage(url);
+      setCutoutImg(cut);
     } catch (e) { setError(e.message); }
     setBusy(false);
   };
 
+  // load background image element when a background image is uploaded
+  useEffect(() => {
+    if (!bgImgUrl) { setBgImg(null); return; }
+    let alive = true;
+    loadImage(bgImgUrl).then((im) => { if (alive) setBgImg(im); }).catch(() => {});
+    return () => { alive = false; };
+  }, [bgImgUrl]);
+
+  const onBgImageUpload = (e) => {
+    const f = e.target.files && e.target.files[0];
+    if (!f) return;
+    setBgImgUrl(URL.createObjectURL(f));
+    setBgType('image');
+    e.target.value = '';
+  };
+
+  const outSize = () => {
+    if (!cutoutImg) return { w: 0, h: 0 };
+    if (sizeMode === 'custom') {
+      const w = Math.max(1, Math.round(Number(customW) || cutoutImg.naturalWidth));
+      const h = Math.max(1, Math.round(Number(customH) || cutoutImg.naturalHeight));
+      return { w, h };
+    }
+    return { w: cutoutImg.naturalWidth, h: cutoutImg.naturalHeight };
+  };
+
+  // live preview render
+  useEffect(() => {
+    const canvas = previewCanvas.current;
+    if (!canvas || !cutoutImg) return;
+    const { w, h } = outSize();
+    canvas.width = w; canvas.height = h;
+    drawComposite(canvas.getContext('2d'), w, h, { bgType, color, bgImg, cutout: cutoutImg });
+  }, [cutoutImg, bgType, color, bgImg, sizeMode, customW, customH]);
+
   const doDownload = async () => {
     try {
-      if (bg === 'transparent') { downloadBlob(result.blob, result.name); return; }
-      const blob = await compositeOnColor(result.url, bg);
-      downloadBlob(blob, result.name.replace('_no_bg', '_bg'));
+      const { w, h } = outSize();
+      if (!w || !h) return;
+      const c = document.createElement('canvas');
+      c.width = w; c.height = h;
+      drawComposite(c.getContext('2d'), w, h, { bgType, color, bgImg, cutout: cutoutImg });
+      const blob = await new Promise((resolve, reject) => c.toBlob((b) => (b ? resolve(b) : reject(new Error('fail'))), 'image/png'));
+      const suffix = bgType === 'transparent' ? '_no_bg' : '_bg';
+      downloadBlob(blob, result.name.replace('_no_bg', suffix));
     } catch (e) { setError('Could not prepare the download. Please try again.'); }
   };
 
   if (result) {
+    const { w, h } = outSize();
     return (
       <Panel>
         <div className="space-y-4" data-testid="removebg-result">
           <div className="flex justify-center">
-            <div className="inline-block rounded-xl p-3 border border-slate-200 dark:border-white/10"
-              style={bg === 'transparent' ? CHECKER : { backgroundColor: bg }}>
-              <img src={result.url} alt="Background removed" className="max-h-72 object-contain" />
+            <div className="inline-block rounded-xl p-3 border border-slate-200 dark:border-white/10" style={CHECKER}>
+              <canvas ref={previewCanvas} className="max-h-72 max-w-full rounded-lg" style={{ width: 'auto', height: 'auto' }} />
             </div>
           </div>
 
+          {/* Background chooser */}
           <div>
             <p className="text-sm font-medium mb-2 text-center">Choose a background</p>
             <div className="flex items-center justify-center gap-2 flex-wrap">
-              <button data-testid="bg-transparent" onClick={() => setBg('transparent')} title="Transparent"
-                className={`w-9 h-9 rounded-full border-2 overflow-hidden ${bg === 'transparent' ? 'border-rose-500 ring-2 ring-rose-500/30' : 'border-slate-200 dark:border-white/20'}`}
+              <button data-testid="bg-transparent" onClick={() => setBgType('transparent')} title="Transparent"
+                className={`w-9 h-9 rounded-full border-2 overflow-hidden ${bgType === 'transparent' ? 'border-rose-500 ring-2 ring-rose-500/30' : 'border-slate-200 dark:border-white/20'}`}
                 style={CHECKER} />
               {BG_SWATCHES.map((c) => (
-                <button key={c} data-testid={`bg-${c}`} onClick={() => setBg(c)} title={c}
-                  className={`w-9 h-9 rounded-full border-2 ${bg === c ? 'border-rose-500 ring-2 ring-rose-500/30' : 'border-slate-200 dark:border-white/20'}`}
+                <button key={c} data-testid={`bg-${c}`} onClick={() => { setColor(c); setBgType('color'); }} title={c}
+                  className={`w-9 h-9 rounded-full border-2 ${bgType === 'color' && color === c ? 'border-rose-500 ring-2 ring-rose-500/30' : 'border-slate-200 dark:border-white/20'}`}
                   style={{ backgroundColor: c }} />
               ))}
-              <label title="Custom colour" className={`relative w-9 h-9 rounded-full border-2 grid place-items-center cursor-pointer overflow-hidden ${bg !== 'transparent' && !BG_SWATCHES.includes(bg) ? 'border-rose-500 ring-2 ring-rose-500/30' : 'border-slate-200 dark:border-white/20'}`}>
+              <label title="Custom colour" className={`relative w-9 h-9 rounded-full border-2 grid place-items-center cursor-pointer overflow-hidden ${bgType === 'color' && !BG_SWATCHES.includes(color) ? 'border-rose-500 ring-2 ring-rose-500/30' : 'border-slate-200 dark:border-white/20'}`}>
                 <Icons.Pipette className="w-4 h-4 text-slate-500 pointer-events-none" />
-                <input data-testid="bg-custom" type="color" onChange={(e) => setBg(e.target.value)} className="absolute inset-0 opacity-0 cursor-pointer" />
+                <input data-testid="bg-custom" type="color" value={color} onChange={(e) => { setColor(e.target.value); setBgType('color'); }} className="absolute inset-0 opacity-0 cursor-pointer" />
+              </label>
+              <label data-testid="bg-image-upload" title="Upload your own background image"
+                className={`relative w-9 h-9 rounded-full border-2 grid place-items-center cursor-pointer overflow-hidden ${bgType === 'image' ? 'border-rose-500 ring-2 ring-rose-500/30' : 'border-slate-200 dark:border-white/20'}`}
+                style={bgImgUrl ? { backgroundImage: `url(${bgImgUrl})`, backgroundSize: 'cover', backgroundPosition: 'center' } : {}}>
+                {!bgImgUrl && <Icons.ImagePlus className="w-4 h-4 text-slate-500 pointer-events-none" />}
+                <input type="file" accept="image/*" onChange={onBgImageUpload} className="absolute inset-0 opacity-0 cursor-pointer" />
               </label>
             </div>
+            <p className="hint text-center mt-2">Pick a colour, or upload your own photo as the background.</p>
+          </div>
+
+          {/* Output size */}
+          <div>
+            <p className="text-sm font-medium mb-2 text-center">Output size</p>
+            <div className="flex items-center justify-center gap-2 flex-wrap">
+              <button data-testid="size-original" onClick={() => setSizeMode('original')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${sizeMode === 'original' ? 'btn-primary text-white border-transparent' : 'border-slate-200 dark:border-white/10 hover:bg-slate-100 dark:hover:bg-white/5'}`}>Original</button>
+              {SIZE_PRESETS.map((p) => (
+                <button key={p.id} data-testid={`size-${p.id}`} onClick={() => { setSizeMode('custom'); setCustomW(p.w); setCustomH(p.h); }}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${sizeMode === 'custom' && Number(customW) === p.w && Number(customH) === p.h ? 'btn-primary text-white border-transparent' : 'border-slate-200 dark:border-white/10 hover:bg-slate-100 dark:hover:bg-white/5'}`}>{p.label}</button>
+              ))}
+            </div>
+            {sizeMode === 'custom' && (
+              <div className="flex items-center justify-center gap-2 mt-3">
+                <input data-testid="size-width" type="number" min="1" placeholder="Width" value={customW} onChange={(e) => setCustomW(e.target.value)} className="input w-28" />
+                <span className="text-slate-400">×</span>
+                <input data-testid="size-height" type="number" min="1" placeholder="Height" value={customH} onChange={(e) => setCustomH(e.target.value)} className="input w-28" />
+                <span className="text-xs text-slate-400">px</span>
+              </div>
+            )}
+            {w > 0 && <p className="hint text-center mt-2">Final image: <b>{w} × {h}</b> px</p>}
           </div>
 
           <div className="text-center space-y-3">
             <button data-testid="download-nobg-btn" onClick={doDownload} className="btn-primary text-white font-semibold px-6 py-3 rounded-xl inline-flex items-center gap-2">
-              <Download className="w-4 h-4" /> Download {bg === 'transparent' ? 'transparent PNG' : 'image'}
+              <Download className="w-4 h-4" /> Download {bgType === 'transparent' ? 'transparent PNG' : 'image'}
             </button>
             {result.engine === 'offline' && (
               <p className="text-xs text-slate-400">Processed with our free offline engine</p>
             )}
             {error && <p className="text-sm text-rose-500 font-medium">{error}</p>}
-            <div><button onClick={() => { setFile(null); setResult(null); setPreview(null); setBg('transparent'); }} className="text-sm text-rose-500 font-semibold inline-flex items-center gap-1"><RefreshCw className="w-3.5 h-3.5" /> Try another photo</button></div>
+            <div><button onClick={() => { setFile(null); setResult(null); setPreview(null); resetBgState(); }} className="text-sm text-rose-500 font-semibold inline-flex items-center gap-1"><RefreshCw className="w-3.5 h-3.5" /> Try another photo</button></div>
           </div>
         </div>
       </Panel>
@@ -324,7 +435,7 @@ const RemoveBgTool = () => {
       <FileChip file={file} onRemove={() => { setFile(null); setPreview(null); }} />
       {error && <p className="text-sm text-rose-500 font-medium" data-testid="tool-error">{error}</p>}
       <PrimaryBtn testId="removebg-btn" busy={busy} busyText="Removing background..." text="Remove background" icon={Icons.Eraser} onClick={run} />
-      <p className="hint text-center">Free &amp; automatic · you can pick a new background after removal</p>
+      <p className="hint text-center">Free &amp; automatic · pick a colour or your own image as background, and set the output size before downloading</p>
     </Panel>
   );
 };
