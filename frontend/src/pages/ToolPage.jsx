@@ -1,8 +1,8 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { PDFDocument, degrees } from 'pdf-lib';
 import * as Icons from 'lucide-react';
-import { ChevronRight, X, ArrowUp, ArrowDown, RotateCw, Trash2, Download, Loader2, CheckCircle2, ArrowLeft, Sparkles } from 'lucide-react';
+import { ChevronRight, X, RotateCw, Trash2, Download, Loader2, CheckCircle2, ArrowLeft, Sparkles } from 'lucide-react';
 import Header from '../components/Header';
 import Footer from '../components/Footer';
 import FileDrop from '../components/FileDrop';
@@ -20,7 +20,7 @@ const positions = [
   { id: 'top-right', label: 'Top right' },
 ];
 
-const MultiThumb = ({ file }) => {
+const MultiPreview = ({ file }) => {
   const [src, setSrc] = useState(null);
   useEffect(() => {
     let alive = true;
@@ -30,12 +30,16 @@ const MultiThumb = ({ file }) => {
       return () => URL.revokeObjectURL(u);
     }
     if (/\.pdf$/i.test(file.name || '')) {
-      pdf.renderPageImage(file, 0, 120).then((p) => { if (alive) setSrc(p.dataUrl); }).catch(() => {});
+      pdf.renderPageImage(file, 0, 400).then((p) => { if (alive) setSrc(p.dataUrl); }).catch(() => {});
     }
     return () => { alive = false; };
   }, [file]);
-  if (!src) return <Icons.FileText className="w-5 h-5 text-rose-500 shrink-0" />;
-  return <img src={src} alt="" className="w-10 h-12 object-cover rounded border border-slate-200 dark:border-white/10 shrink-0" />;
+  if (!src) return (
+    <div className="flex flex-col items-center gap-1 text-rose-500">
+      <Icons.FileText className="w-10 h-10" />
+    </div>
+  );
+  return <img src={src} alt="" className="w-full h-full object-contain" draggable={false} />;
 };
 
 const ToolPage = () => {
@@ -57,9 +61,35 @@ const ToolPage = () => {
   const [file2, setFile2] = useState(null);
   const [preview, setPreview] = useState(null);
 
+  // Drag-and-drop reorder for multi-file tools (Merge / JPG to PDF)
+  const dragItem = useRef(null);
+  const dragOverItem = useRef(null);
+  const [dragOverIndex, setDragOverIndex] = useState(null);
+
   const serverCfg = SERVER_TOOLS[slug];
 
-  useEffect(() => { window.scrollTo(0, 0); }, [slug]);
+  const DEFAULT_OPTS = { ranges: '1', position: 'bottom-center', start: 1, wtext: 'CONFIDENTIAL', opacity: 0.25, angle: 90, quality: 2, targetVal: 200, targetUnit: 'KB', password: '', lang: 'eng', margin: 5, url: '', html: '' };
+
+  // Reset every piece of state whenever the tool (slug) changes so each tool starts fresh
+  useEffect(() => {
+    window.scrollTo(0, 0);
+    setFiles([]);
+    setBusy(false);
+    setError('');
+    setResult(null);
+    setThumbs([]);
+    setTotal(0);
+    setSelected(new Set());
+    setOrder([]);
+    setRotations({});
+    setProgress(0);
+    setFile2(null);
+    setPreview(null);
+    setDragOverIndex(null);
+    dragItem.current = null;
+    dragOverItem.current = null;
+    setOpts(DEFAULT_OPTS);
+  }, [slug]);
   useEffect(() => { if (!tool) navigate('/'); }, [tool, navigate]);
 
   const Icon = tool ? (Icons[tool.icon] || Icons.FileText) : Icons.FileText;
@@ -106,6 +136,26 @@ const ToolPage = () => {
     });
   };
   const removeFile = (i) => setFiles((prev) => prev.filter((_, idx) => idx !== i));
+
+  // Drag-and-drop reorder handlers for the multi-file grid
+  const handleDragStart = (i) => { dragItem.current = i; };
+  const handleDragEnter = (i) => { dragOverItem.current = i; setDragOverIndex(i); };
+  const handleDragEnd = () => {
+    const from = dragItem.current;
+    const to = dragOverItem.current;
+    if (from !== null && to !== null && from !== to) {
+      setFiles((prev) => {
+        const arr = [...prev];
+        const [moved] = arr.splice(from, 1);
+        arr.splice(to, 0, moved);
+        return arr;
+      });
+      reset();
+    }
+    dragItem.current = null;
+    dragOverItem.current = null;
+    setDragOverIndex(null);
+  };
 
   const toggleSelect = (idx) => {
     setSelected((prev) => {
@@ -352,21 +402,49 @@ const ToolPage = () => {
               />
             ) : (
               <div className="rounded-3xl border border-slate-200 dark:border-white/10 bg-white dark:bg-white/[0.03] p-5 sm:p-7 space-y-5">
-                {/* File list for multi tools */}
+                {/* Preview grid for multi tools (Merge / JPG to PDF) */}
                 {isMulti && (
-                  <div className="space-y-2">
-                    {files.map((f, i) => (
-                      <div key={i} className="flex items-center gap-3 rounded-xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/[0.02] px-4 py-3">
-                        <MultiThumb file={f} />
-                        <span className="text-sm truncate flex-1">{f.name}</span>
-                        <span className="text-xs text-slate-400">{(f.size / 1024).toFixed(0)} KB</span>
-                        <div className="flex items-center gap-1">
-                          <button onClick={() => move(i, -1)} className="p-1.5 rounded-lg hover:bg-slate-200 dark:hover:bg-white/10"><ArrowUp className="w-4 h-4" /></button>
-                          <button onClick={() => move(i, 1)} className="p-1.5 rounded-lg hover:bg-slate-200 dark:hover:bg-white/10"><ArrowDown className="w-4 h-4" /></button>
-                          <button onClick={() => removeFile(i)} className="p-1.5 rounded-lg text-rose-500 hover:bg-rose-500/10"><X className="w-4 h-4" /></button>
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between flex-wrap gap-2">
+                      <p className="text-sm font-medium">{files.length} file{files.length > 1 ? 's' : ''} added</p>
+                      {files.length > 1 && (
+                        <p className="text-xs text-slate-400 flex items-center gap-1.5">
+                          <Icons.Move className="w-3.5 h-3.5" /> Drag to reorder {isImageInput ? 'pages' : 'files'}
+                        </p>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
+                      {files.map((f, i) => (
+                        <div
+                          key={`${f.name}-${i}`}
+                          data-testid={`multi-file-card-${i}`}
+                          draggable
+                          onDragStart={() => handleDragStart(i)}
+                          onDragEnter={() => handleDragEnter(i)}
+                          onDragEnd={handleDragEnd}
+                          onDragOver={(e) => e.preventDefault()}
+                          className={`relative group rounded-xl border-2 bg-slate-50 dark:bg-white/[0.02] p-2 cursor-move transition-all ${dragOverIndex === i ? 'border-rose-500 ring-2 ring-rose-500/30 scale-[1.02]' : 'border-slate-200 dark:border-white/10'}`}
+                        >
+                          <div className="aspect-[3/4] rounded-lg overflow-hidden bg-white dark:bg-black/20 grid place-items-center">
+                            <MultiPreview file={f} />
+                          </div>
+                          <span className="absolute top-3 left-3 grid place-items-center min-w-[1.5rem] h-6 px-1.5 rounded-full bg-rose-500 text-white text-xs font-bold shadow">{i + 1}</span>
+                          <button
+                            onClick={() => removeFile(i)}
+                            data-testid={`remove-file-${i}`}
+                            className="absolute top-3 right-3 grid place-items-center w-6 h-6 rounded-full bg-black/60 text-white opacity-0 group-hover:opacity-100 hover:bg-rose-500 transition-opacity"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                          <p className="text-xs truncate mt-2 text-center px-1" title={f.name}>{f.name}</p>
+                          <p className="text-[10px] text-slate-400 text-center">{(f.size / 1024).toFixed(0)} KB</p>
+                          <div className="flex justify-center gap-1 mt-1">
+                            <button onClick={() => move(i, -1)} disabled={i === 0} title="Move left" className="p-1 rounded-lg hover:bg-slate-200 dark:hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed"><ArrowLeft className="w-3.5 h-3.5" /></button>
+                            <button onClick={() => move(i, 1)} disabled={i === files.length - 1} title="Move right" className="p-1 rounded-lg hover:bg-slate-200 dark:hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed"><Icons.ArrowRight className="w-3.5 h-3.5" /></button>
+                          </div>
                         </div>
-                      </div>
-                    ))}
+                      ))}
+                    </div>
                     <FileDrop accept={isImageInput ? 'image/*' : (slug === 'merge-pdf' ? '.pdf,image/*' : '.pdf')} multiple onFiles={onFiles} label="Add more" hint="drop to append" />
                   </div>
                 )}
